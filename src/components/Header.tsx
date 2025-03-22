@@ -1,95 +1,202 @@
-import { Link } from 'react-router-dom';
+import { Fragment } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Disclosure, Menu, Transition } from '@headlessui/react';
+import { Bars3Icon, XMarkIcon } from '@heroicons/react/24/outline';
 import { useAuth } from '../contexts/AuthContext';
+
+const navigation = [
+  { name: 'Ana Sayfa', href: '/' },
+  { name: 'Becayiş İstekleri', href: '/exchange' },
+  { name: 'Forum', href: '/forum' },
+  { name: 'Memur Haberleri', href: '/news' },
+  { name: 'Eşleşmeler', href: '/matches' }
+];
+
+function classNames(...classes: string[]) {
+  return classes.filter(Boolean).join(' ');
+}
 
 export default function Header() {
   const { currentUser, logout } = useAuth();
+  const navigate = useNavigate();
 
   const handleLogout = async () => {
     try {
       await logout();
+      navigate('/login');
     } catch (error) {
       console.error('Çıkış yapılırken hata oluştu:', error);
     }
   };
 
   return (
-    <header className="bg-white shadow-sm">
-      <div className="container mx-auto px-4">
-        <div className="flex items-center justify-between h-16">
-          <div className="flex items-center">
-            <Link to="/" className="flex items-center">
-              <span className="text-2xl font-bold text-primary-600">BecayişPortalı</span>
-            </Link>
+    <Disclosure as="nav" className="bg-white shadow">
+      {({ open }) => (
+        <>
+          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div className="flex h-16 justify-between">
+              <div className="flex">
+                <div className="flex flex-shrink-0 items-center">
+                  <Link to="/" className="text-xl font-bold text-blue-600">
+                    Becayiş
+                  </Link>
+                </div>
+                <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
+                  {navigation.map((item) => (
+                    <Link
+                      key={item.name}
+                      to={item.href}
+                      className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                    >
+                      {item.name}
+                    </Link>
+                  ))}
+                </div>
+              </div>
+              <div className="hidden sm:ml-6 sm:flex sm:items-center">
+                {currentUser ? (
+                  <Menu as="div" className="relative ml-3">
+                    <div>
+                      <Menu.Button className="flex rounded-full bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
+                        <span className="sr-only">Kullanıcı menüsünü aç</span>
+                        <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center">
+                          <span className="text-blue-600 font-medium">
+                            {currentUser.email?.[0].toUpperCase()}
+                          </span>
+                        </div>
+                      </Menu.Button>
+                    </div>
+                    <Transition
+                      as={Fragment}
+                      enter="transition ease-out duration-200"
+                      enterFrom="transform opacity-0 scale-95"
+                      enterTo="transform opacity-100 scale-100"
+                      leave="transition ease-in duration-75"
+                      leaveFrom="transform opacity-100 scale-100"
+                      leaveTo="transform opacity-0 scale-95"
+                    >
+                      <Menu.Items className="absolute right-0 z-10 mt-2 w-48 origin-top-right rounded-md bg-white py-1 shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none">
+                        <Menu.Item>
+                          {({ active }) => (
+                            <Link
+                              to="/profile"
+                              className={classNames(
+                                active ? 'bg-gray-100' : '',
+                                'block px-4 py-2 text-sm text-gray-700'
+                              )}
+                            >
+                              Profilim
+                            </Link>
+                          )}
+                        </Menu.Item>
+                        <Menu.Item>
+                          {({ active }) => (
+                            <button
+                              onClick={handleLogout}
+                              className={classNames(
+                                active ? 'bg-gray-100' : '',
+                                'block w-full text-left px-4 py-2 text-sm text-gray-700'
+                              )}
+                            >
+                              Çıkış Yap
+                            </button>
+                          )}
+                        </Menu.Item>
+                      </Menu.Items>
+                    </Transition>
+                  </Menu>
+                ) : (
+                  <div className="flex space-x-4">
+                    <Link
+                      to="/login"
+                      className="inline-flex items-center rounded-md border border-transparent bg-blue-100 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-200"
+                    >
+                      Giriş Yap
+                    </Link>
+                    <Link
+                      to="/register"
+                      className="inline-flex items-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                    >
+                      Üye Ol
+                    </Link>
+                  </div>
+                )}
+              </div>
+              <div className="-mr-2 flex items-center sm:hidden">
+                <Disclosure.Button className="inline-flex items-center justify-center rounded-md p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-500">
+                  <span className="sr-only">Ana menüyü aç</span>
+                  {open ? (
+                    <XMarkIcon className="block h-6 w-6" aria-hidden="true" />
+                  ) : (
+                    <Bars3Icon className="block h-6 w-6" aria-hidden="true" />
+                  )}
+                </Disclosure.Button>
+              </div>
+            </div>
           </div>
 
-          <nav className="hidden md:flex space-x-8">
-            <Link
-              to="/"
-              className="text-gray-700 hover:text-primary-600 px-3 py-2 rounded-md text-sm font-medium"
-            >
-              Ana Sayfa
-            </Link>
-            <Link
-              to="/create-request"
-              className="text-gray-700 hover:text-primary-600 px-3 py-2 rounded-md text-sm font-medium"
-            >
-              Becayiş İsteği Oluştur
-            </Link>
-          </nav>
-
-          <div className="flex items-center">
-            {currentUser ? (
-              <div className="flex items-center space-x-4">
+          <Disclosure.Panel className="sm:hidden">
+            <div className="space-y-1 pb-3 pt-2">
+              {navigation.map((item) => (
                 <Link
-                  to="/messages"
-                  className="text-gray-700 hover:text-primary-600 px-3 py-2 rounded-md text-sm font-medium"
+                  key={item.name}
+                  to={item.href}
+                  className="block border-l-4 border-transparent py-2 pl-3 pr-4 text-base font-medium text-gray-500 hover:border-gray-300 hover:bg-gray-50 hover:text-gray-700"
                 >
-                  Mesajlar
+                  {item.name}
                 </Link>
-                <div className="relative group">
-                  <button className="flex items-center space-x-2 text-gray-700 hover:text-primary-600">
-                    <img
-                      src={currentUser.photoURL || '/default-avatar.png'}
-                      alt="Profil"
-                      className="w-8 h-8 rounded-full"
-                    />
-                    <span className="text-sm font-medium">{currentUser.displayName}</span>
-                  </button>
-                  <div className="absolute right-0 w-48 mt-2 py-2 bg-white rounded-md shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-300">
-                    <Link
-                      to="/profile"
-                      className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                    >
-                      Profil
-                    </Link>
-                    <button
-                      onClick={handleLogout}
-                      className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                    >
-                      Çıkış Yap
-                    </button>
+              ))}
+            </div>
+            {currentUser ? (
+              <div className="border-t border-gray-200 pb-3 pt-4">
+                <div className="flex items-center px-4">
+                  <div className="flex-shrink-0">
+                    <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center">
+                      <span className="text-blue-600 font-medium">
+                        {currentUser.email?.[0].toUpperCase()}
+                      </span>
+                    </div>
                   </div>
+                  <div className="ml-3">
+                    <div className="text-base font-medium text-gray-800">
+                      {currentUser.email}
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-3 space-y-1">
+                  <Link
+                    to="/profile"
+                    className="block px-4 py-2 text-base font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-800"
+                  >
+                    Profilim
+                  </Link>
+                  <button
+                    onClick={handleLogout}
+                    className="block w-full text-left px-4 py-2 text-base font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-800"
+                  >
+                    Çıkış Yap
+                  </button>
                 </div>
               </div>
             ) : (
-              <div className="flex items-center space-x-4">
+              <div className="border-t border-gray-200 pb-3 pt-4 space-y-1">
                 <Link
                   to="/login"
-                  className="text-gray-700 hover:text-primary-600 px-3 py-2 rounded-md text-sm font-medium"
+                  className="block px-4 py-2 text-base font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-800"
                 >
                   Giriş Yap
                 </Link>
                 <Link
                   to="/register"
-                  className="bg-primary-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-primary-700"
+                  className="block px-4 py-2 text-base font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-800"
                 >
-                  Kayıt Ol
+                  Üye Ol
                 </Link>
               </div>
             )}
-          </div>
-        </div>
-      </div>
-    </header>
+          </Disclosure.Panel>
+        </>
+      )}
+    </Disclosure>
   );
 } 
