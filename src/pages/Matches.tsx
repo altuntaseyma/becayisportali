@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { MatchingService } from '../services/MatchingService';
 import { MatchPair, MatchPreference } from '../types/matching';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db } from '../config/firebase';
 import { CheckIcon, XMarkIcon } from '@heroicons/react/24/solid';
 import MatchDetailModal from '../components/MatchDetailModal';
 

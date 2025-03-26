@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { storage, db } from '../firebase';
+import { storage, db } from '../config/firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { doc, updateDoc, getDoc } from 'firebase/firestore';
 import { UserCircleIcon, PencilIcon, CheckIcon, XMarkIcon } from '@heroicons/react/24/solid';
 import { iller, ilceler } from '../data/turkiyeData';
+import { userService } from '../services/userService';
+import { User } from '../types/database';
+import { updatePassword, EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
 
 interface UserProfile {
   fullName: string;
@@ -55,359 +58,426 @@ const kurumTurleri = [
 
 const Profile = () => {
   const { currentUser } = useAuth();
-  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isEditing, setIsEditing] = useState(false);
-  const [editedProfile, setEditedProfile] = useState<UserProfile | null>(null);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
+  const [userData, setUserData] = useState<User | null>(null);
+  const [formData, setFormData] = useState({
+    name: '',
+    institution: '',
+    department: '',
+    location: {
+      il: '',
+      ilce: ''
+    }
+  });
+  const [selectedIl, setSelectedIl] = useState('');
+  const [availableIlceler, setAvailableIlceler] = useState<string[]>([]);
+  const [showPasswordChange, setShowPasswordChange] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: ''
+  });
+  const [passwordError, setPasswordError] = useState('');
+  const [passwordSuccess, setPasswordSuccess] = useState('');
 
   useEffect(() => {
-    const fetchProfile = async () => {
+    const loadUserData = async () => {
       if (currentUser?.uid) {
-        const docRef = doc(db, 'users', currentUser.uid);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          setProfile(docSnap.data() as UserProfile);
-          setEditedProfile(docSnap.data() as UserProfile);
+        try {
+          const user = await userService.getUser(currentUser.uid);
+          if (user) {
+            setUserData(user);
+            setFormData({
+              name: user.name,
+              institution: user.institution,
+              department: user.department,
+              location: user.location
+            });
+            setSelectedIl(user.location.il);
+            setAvailableIlceler(ilceler[user.location.il as keyof typeof ilceler] || []);
+          }
+        } catch (error) {
+          console.error('Kullanıcı bilgileri yüklenirken hata:', error);
+          setError('Kullanıcı bilgileri yüklenemedi.');
         }
       }
     };
-    fetchProfile();
+
+    loadUserData();
   }, [currentUser]);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      if (file.size > 5 * 1024 * 1024) { // 5MB limit
-        setError('Dosya boyutu 5MB\'dan küçük olmalıdır');
-        return;
+  useEffect(() => {
+    if (selectedIl) {
+      setAvailableIlceler(ilceler[selectedIl as keyof typeof ilceler] || []);
+      if (!ilceler[selectedIl as keyof typeof ilceler]?.includes(formData.location.ilce)) {
+        setFormData(prev => ({
+          ...prev,
+          location: {
+            ...prev.location,
+            ilce: ''
+          }
+        }));
       }
-      if (!file.type.startsWith('image/')) {
-        setError('Lütfen geçerli bir resim dosyası seçin');
-        return;
-      }
-      setSelectedFile(file);
-      setError('');
+    }
+  }, [selectedIl]);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    if (name === 'il') {
+      setSelectedIl(value);
+      setFormData(prev => ({
+        ...prev,
+        location: {
+          il: value,
+          ilce: ''
+        }
+      }));
+    } else if (name === 'ilce') {
+      setFormData(prev => ({
+        ...prev,
+        location: {
+          ...prev.location,
+          ilce: value
+        }
+      }));
+    } else {
+      setFormData(prev => ({
+        ...prev,
+        [name]: value
+      }));
     }
   };
 
-  const handleProfileUpdate = async () => {
-    if (!currentUser?.uid || !editedProfile) return;
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser) return;
+
     setLoading(true);
     setError('');
-    setSuccess('');
 
     try {
-      // Zorunlu alanları kontrol et
-      const requiredFields = ['kurumTuru', 'kurum', 'il', 'ilce', 'pozisyon'];
-      const missingFields = requiredFields.filter(field => !editedProfile[field as keyof UserProfile]);
-
-      if (missingFields.length > 0) {
-        throw new Error(`Lütfen tüm zorunlu alanları doldurunuz: ${missingFields.map(field => {
-          switch(field) {
-            case 'kurumTuru': return 'Bakanlık/Kurum';
-            case 'kurum': return 'Çalıştığınız Birim';
-            case 'il': return 'İl';
-            case 'ilce': return 'İlçe';
-            case 'pozisyon': return 'Pozisyon';
-            default: return field;
-          }
-        }).join(', ')}`);
-      }
-
-      let photoURL = profile?.photoURL;
-
-      if (selectedFile) {
-        try {
-          const storageRef = ref(storage, `profile-photos/${currentUser.uid}`);
-          await uploadBytes(storageRef, selectedFile);
-          photoURL = await getDownloadURL(storageRef);
-        } catch (uploadError) {
-          console.error('Profil fotoğrafı yüklenirken hata:', uploadError);
-          throw new Error('Profil fotoğrafı yüklenirken bir hata oluştu');
-        }
-      }
-
-      const updateData = {
-        ...editedProfile,
-        photoURL: photoURL || '',
-        updatedAt: new Date()
-      };
-
-      // Boş değerleri temizle
-      Object.keys(updateData).forEach(key => {
-        if (updateData[key as keyof typeof updateData] === '') {
-          delete updateData[key as keyof typeof updateData];
-        }
-      });
-
-      const userRef = doc(db, 'users', currentUser.uid);
-      await updateDoc(userRef, updateData);
-
-      setProfile({ ...editedProfile, photoURL: photoURL || '' });
+      await userService.updateUser(currentUser.uid, formData);
+      const updatedUser = await userService.getUser(currentUser.uid);
+      setUserData(updatedUser);
       setIsEditing(false);
-      setSuccess('Profil başarıyla güncellendi');
-      setTimeout(() => setSuccess(''), 3000);
     } catch (error) {
       console.error('Profil güncellenirken hata:', error);
-      setError(error instanceof Error ? error.message : 'Profil güncellenirken bir hata oluştu');
+      setError('Profil güncellenirken bir hata oluştu.');
     } finally {
       setLoading(false);
     }
   };
 
-  if (!profile) {
-    return (
-      <div className="flex justify-center items-center h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-900"></div>
-      </div>
-    );
+  const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setPasswordForm(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  const handlePasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser) return;
+
+    setPasswordError('');
+    setPasswordSuccess('');
+
+    // Şifre doğrulamaları
+    if (passwordForm.newPassword.length < 6) {
+      setPasswordError('Yeni şifre en az 6 karakter olmalıdır.');
+      return;
+    }
+
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setPasswordError('Yeni şifre ve tekrarı eşleşmiyor.');
+      return;
+    }
+
+    try {
+      // Önce kullanıcıyı yeniden doğrula
+      const credential = EmailAuthProvider.credential(
+        currentUser.email!,
+        passwordForm.currentPassword
+      );
+      await reauthenticateWithCredential(currentUser, credential);
+
+      // Şifreyi güncelle
+      await updatePassword(currentUser, passwordForm.newPassword);
+      setPasswordSuccess('Şifreniz başarıyla güncellendi.');
+      setPasswordForm({
+        currentPassword: '',
+        newPassword: '',
+        confirmPassword: ''
+      });
+      setShowPasswordChange(false);
+    } catch (error: any) {
+      console.error('Şifre güncellenirken hata:', error);
+      if (error.code === 'auth/wrong-password') {
+        setPasswordError('Mevcut şifreniz yanlış.');
+      } else {
+        setPasswordError('Şifre güncellenirken bir hata oluştu. Lütfen tekrar deneyin.');
+      }
+    }
+  };
+
+  if (!userData) {
+    return <div className="flex justify-center items-center min-h-screen">Yükleniyor...</div>;
   }
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="bg-white shadow rounded-lg overflow-hidden">
           {/* Profil Başlığı */}
-          <div className="relative h-32 bg-gradient-to-r from-blue-500 to-blue-600">
+          <div className="bg-blue-500 h-32 relative">
             <div className="absolute -bottom-12 left-8">
-              <div className="relative">
-                {profile.photoURL ? (
+              <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center border-4 border-white">
+                {userData.photoURL ? (
                   <img
-                    src={profile.photoURL}
-                    alt="Profil fotoğrafı"
-                    className="w-24 h-24 rounded-full border-4 border-white object-cover"
+                    src={userData.photoURL}
+                    alt={userData.name}
+                    className="w-20 h-20 rounded-full"
                   />
                 ) : (
-                  <div className="w-24 h-24 rounded-full border-4 border-white bg-gray-200 flex items-center justify-center">
-                    <UserCircleIcon className="w-20 h-20 text-gray-400" />
-                  </div>
-                )}
-                {isEditing && (
-                  <div className="absolute bottom-0 right-0">
-                    <label htmlFor="photo-upload" className="cursor-pointer">
-                      <div className="bg-blue-500 text-white p-2 rounded-full hover:bg-blue-600 transition-colors">
-                        <PencilIcon className="w-4 h-4" />
-                      </div>
-                      <input
-                        id="photo-upload"
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={handleFileChange}
-                      />
-                    </label>
+                  <div className="w-20 h-20 rounded-full bg-gray-200 flex items-center justify-center">
+                    <span className="text-2xl text-gray-500">
+                      {userData.name.charAt(0).toUpperCase()}
+                    </span>
                   </div>
                 )}
               </div>
+            </div>
+            <div className="absolute top-4 right-4">
+              <button
+                onClick={() => setIsEditing(!isEditing)}
+                className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+              >
+                {isEditing ? 'İptal' : 'Düzenle'}
+              </button>
             </div>
           </div>
 
-          <div className="pt-16 pb-6 px-8">
-            <div className="flex justify-between items-start mb-6">
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900">{profile.fullName}</h1>
-                <p className="text-gray-600">{profile.email}</p>
-              </div>
-              {!isEditing ? (
-                <button
-                  onClick={() => setIsEditing(true)}
-                  className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                >
-                  <PencilIcon className="w-4 h-4 mr-2" />
-                  Düzenle
-                </button>
-              ) : (
-                <div className="flex space-x-3">
-                  <button
-                    onClick={() => {
-                      setIsEditing(false);
-                      setEditedProfile(profile);
-                      setError('');
-                    }}
-                    className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                  >
-                    <XMarkIcon className="w-4 h-4 mr-2" />
-                    İptal
-                  </button>
-                  <button
-                    onClick={handleProfileUpdate}
-                    disabled={loading}
-                    className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-blue-300 disabled:cursor-not-allowed"
-                  >
-                    {loading ? (
-                      <>
-                        <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                        Kaydediliyor...
-                      </>
-                    ) : (
-                      <>
-                        <CheckIcon className="w-4 h-4 mr-2" />
-                        Kaydet
-                      </>
-                    )}
-                  </button>
-                </div>
-              )}
-            </div>
-
+          {/* Profil Bilgileri */}
+          <div className="px-8 py-6 pt-16">
             {error && (
-              <div className="mb-4 rounded-md bg-red-50 p-4">
-                <div className="flex">
-                  <div className="flex-shrink-0">
-                    <XMarkIcon className="h-5 w-5 text-red-400" />
-                  </div>
-                  <div className="ml-3">
-                    <p className="text-sm font-medium text-red-800">{error}</p>
-                  </div>
-                </div>
+              <div className="mb-4 bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded">
+                {error}
               </div>
             )}
 
-            {success && (
-              <div className="mb-4 rounded-md bg-green-50 p-4">
-                <div className="flex">
-                  <div className="flex-shrink-0">
-                    <CheckIcon className="h-5 w-5 text-green-400" />
-                  </div>
-                  <div className="ml-3">
-                    <p className="text-sm font-medium text-green-800">{success}</p>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-6">
+            {isEditing ? (
+              <form onSubmit={handleSubmit} className="space-y-6">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Çalıştığınız Bakanlık/Kurum</label>
-                  {isEditing ? (
+                  <label htmlFor="name" className="block text-sm font-medium text-gray-700">
+                    Ad Soyad
+                  </label>
+                  <input
+                    type="text"
+                    name="name"
+                    id="name"
+                    value={formData.name}
+                    onChange={handleInputChange}
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="institution" className="block text-sm font-medium text-gray-700">
+                    Çalıştığınız Kurum
+                  </label>
+                  <input
+                    type="text"
+                    name="institution"
+                    id="institution"
+                    value={formData.institution}
+                    onChange={handleInputChange}
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="department" className="block text-sm font-medium text-gray-700">
+                    Departman
+                  </label>
+                  <input
+                    type="text"
+                    name="department"
+                    id="department"
+                    value={formData.department}
+                    onChange={handleInputChange}
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label htmlFor="il" className="block text-sm font-medium text-gray-700">
+                      İl
+                    </label>
                     <select
-                      value={editedProfile?.kurumTuru || ''}
-                      onChange={(e) =>
-                        setEditedProfile((prev) => ({ ...prev!, kurumTuru: e.target.value }))
-                      }
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                    >
-                      <option value="">Bakanlık/Kurum Seçin</option>
-                      {kurumTurleri.map((kurumTuru) => (
-                        <option key={kurumTuru} value={kurumTuru}>
-                          {kurumTuru}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <p className="mt-1 p-2 block w-full rounded-md border border-gray-300 bg-gray-50">
-                      {profile.kurumTuru}
-                    </p>
-                  )}
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Çalıştığınız Birim</label>
-                  {isEditing ? (
-                    <input
-                      type="text"
-                      value={editedProfile?.kurum || ''}
-                      onChange={(e) =>
-                        setEditedProfile((prev) => ({ ...prev!, kurum: e.target.value }))
-                      }
-                      placeholder="Örn: Ankara Adliyesi, Çankaya İlçe Milli Eğitim Müdürlüğü"
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                    />
-                  ) : (
-                    <p className="mt-1 p-2 block w-full rounded-md border border-gray-300 bg-gray-50">
-                      {profile.kurum}
-                    </p>
-                  )}
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Pozisyon</label>
-                  {isEditing ? (
-                    <select
-                      value={editedProfile?.pozisyon || ''}
-                      onChange={(e) =>
-                        setEditedProfile((prev) => ({ ...prev!, pozisyon: e.target.value }))
-                      }
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                    >
-                      <option value="">Pozisyon Seçin</option>
-                      {positions.map((position) => (
-                        <option key={position} value={position}>
-                          {position}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <p className="mt-1 p-2 block w-full rounded-md border border-gray-300 bg-gray-50">
-                      {profile.pozisyon}
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              <div className="space-y-6">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">İl</label>
-                  {isEditing ? (
-                    <select
-                      value={editedProfile?.il || ''}
-                      onChange={(e) => {
-                        setEditedProfile((prev) => ({
-                          ...prev!,
-                          il: e.target.value,
-                          ilce: '' // İl değiştiğinde ilçeyi sıfırla
-                        }));
-                      }}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                      name="il"
+                      id="il"
+                      value={formData.location.il}
+                      onChange={handleInputChange}
+                      className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                     >
                       <option value="">İl Seçin</option>
-                      {iller.map((il) => (
+                      {Object.keys(iller).map(il => (
                         <option key={il} value={il}>
                           {il}
                         </option>
                       ))}
                     </select>
-                  ) : (
-                    <p className="mt-1 p-2 block w-full rounded-md border border-gray-300 bg-gray-50">
-                      {profile.il}
-                    </p>
-                  )}
-                </div>
+                  </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">İlçe</label>
-                  {isEditing ? (
+                  <div>
+                    <label htmlFor="ilce" className="block text-sm font-medium text-gray-700">
+                      İlçe
+                    </label>
                     <select
-                      value={editedProfile?.ilce || ''}
-                      onChange={(e) =>
-                        setEditedProfile((prev) => ({ ...prev!, ilce: e.target.value }))
-                      }
-                      disabled={!editedProfile?.il}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                      name="ilce"
+                      id="ilce"
+                      value={formData.location.ilce}
+                      onChange={handleInputChange}
+                      className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                     >
                       <option value="">İlçe Seçin</option>
-                      {editedProfile?.il &&
-                        ilceler[editedProfile.il]?.map((ilce) => (
-                          <option key={ilce} value={ilce}>
-                            {ilce}
-                          </option>
-                        ))}
+                      {availableIlceler.map(ilce => (
+                        <option key={ilce} value={ilce}>
+                          {ilce}
+                        </option>
+                      ))}
                     </select>
-                  ) : (
-                    <p className="mt-1 p-2 block w-full rounded-md border border-gray-300 bg-gray-50">
-                      {profile.ilce}
-                    </p>
+                  </div>
+                </div>
+
+                <div className="flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                  >
+                    {loading ? 'Kaydediliyor...' : 'Kaydet'}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div className="space-y-6">
+                <div>
+                  <h3 className="text-lg font-medium text-gray-900">{userData.name}</h3>
+                  <p className="text-sm text-gray-500">{userData.email}</p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <h4 className="text-sm font-medium text-gray-500">Çalıştığınız Kurum</h4>
+                    <p className="mt-1 text-sm text-gray-900">{userData.institution}</p>
+                  </div>
+
+                  <div>
+                    <h4 className="text-sm font-medium text-gray-500">Departman</h4>
+                    <p className="mt-1 text-sm text-gray-900">{userData.department}</p>
+                  </div>
+
+                  <div>
+                    <h4 className="text-sm font-medium text-gray-500">İl</h4>
+                    <p className="mt-1 text-sm text-gray-900">{userData.location.il}</p>
+                  </div>
+
+                  <div>
+                    <h4 className="text-sm font-medium text-gray-500">İlçe</h4>
+                    <p className="mt-1 text-sm text-gray-900">{userData.location.ilce}</p>
+                  </div>
+                </div>
+
+                {/* Şifre Değiştirme Bölümü */}
+                <div className="mt-6 border-t border-gray-200 pt-6">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-lg font-medium text-gray-900">Şifre Değiştirme</h3>
+                    <button
+                      onClick={() => setShowPasswordChange(!showPasswordChange)}
+                      className="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-blue-600 bg-blue-100 hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                    >
+                      {showPasswordChange ? 'İptal' : 'Şifre Değiştir'}
+                    </button>
+                  </div>
+
+                  {showPasswordChange && (
+                    <form onSubmit={handlePasswordSubmit} className="space-y-4">
+                      {passwordError && (
+                        <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded">
+                          {passwordError}
+                        </div>
+                      )}
+                      {passwordSuccess && (
+                        <div className="bg-green-50 border border-green-200 text-green-600 px-4 py-3 rounded">
+                          {passwordSuccess}
+                        </div>
+                      )}
+
+                      <div>
+                        <label htmlFor="currentPassword" className="block text-sm font-medium text-gray-700">
+                          Mevcut Şifre
+                        </label>
+                        <input
+                          type="password"
+                          name="currentPassword"
+                          id="currentPassword"
+                          value={passwordForm.currentPassword}
+                          onChange={handlePasswordChange}
+                          className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                          required
+                        />
+                      </div>
+
+                      <div>
+                        <label htmlFor="newPassword" className="block text-sm font-medium text-gray-700">
+                          Yeni Şifre
+                        </label>
+                        <input
+                          type="password"
+                          name="newPassword"
+                          id="newPassword"
+                          value={passwordForm.newPassword}
+                          onChange={handlePasswordChange}
+                          className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                          minLength={6}
+                          required
+                        />
+                      </div>
+
+                      <div>
+                        <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700">
+                          Yeni Şifre Tekrar
+                        </label>
+                        <input
+                          type="password"
+                          name="confirmPassword"
+                          id="confirmPassword"
+                          value={passwordForm.confirmPassword}
+                          onChange={handlePasswordChange}
+                          className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                          minLength={6}
+                          required
+                        />
+                      </div>
+
+                      <div className="flex justify-end">
+                        <button
+                          type="submit"
+                          className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                        >
+                          Şifreyi Güncelle
+                        </button>
+                      </div>
+                    </form>
                   )}
                 </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       </div>

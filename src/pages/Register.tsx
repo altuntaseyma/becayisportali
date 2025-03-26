@@ -4,8 +4,19 @@ import { useAuth } from '../contexts/AuthContext';
 import { kurumKategorileri, kurumlar, iller, ilceler } from '../data/turkiyeData';
 import { ChevronDownIcon } from '@heroicons/react/24/solid';
 
+interface RegisterFormData {
+  fullName: string;
+  email: string;
+  kurumKategorisi: string;
+  kurumTuru: string;
+  il: string;
+  ilce: string;
+  password: string;
+  confirmPassword: string;
+}
+
 export default function Register() {
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<RegisterFormData>({
     fullName: '',
     email: '',
     kurumKategorisi: '',
@@ -81,9 +92,11 @@ export default function Register() {
     try {
       setError('');
       setLoading(true);
-      await register(formData);
+      const { confirmPassword, ...registerData } = formData;
+      await register(registerData);
       navigate('/');
     } catch (error) {
+      console.error('Kayıt hatası:', error);
       setError('Hesap oluşturulurken bir hata oluştu. Lütfen bilgilerinizi kontrol edin.');
     } finally {
       setLoading(false);

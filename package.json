@@ -9,14 +9,19 @@
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "start": "vite",
-    "serve": "vite preview"
+    "serve": "vite preview",
+    "create-test-user": "ts-node --esm scripts/createTestUser.ts"
   },
   "dependencies": {
-    "@firebase/auth": "^1.3.0",
+    "@firebase/app": "^0.11.3",
+    "@firebase/auth": "^1.9.1",
+    "@firebase/firestore": "^4.7.10",
+    "@firebase/storage": "^0.13.7",
+    "@firebasegen/default-connector": "file:dataconnect-generated/js/default-connector",
     "@headlessui/react": "^2.2.0",
     "@heroicons/react": "^2.2.0",
     "@types/react-router-dom": "^5.3.3",
-    "firebase": "^11.4.0",
+    "firebase": "^11.5.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.20.0"
@@ -38,6 +43,7 @@
     "globals": "^15.15.0",
     "postcss": "^8.4.31",
     "tailwindcss": "^3.3.0",
+    "ts-node": "^10.9.2",
     "typescript": "^5.2.2",
     "vite": "^6.2.2"
   }

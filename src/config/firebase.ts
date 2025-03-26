@@ -1,8 +1,9 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, connectAuthEmulator } from 'firebase/auth';
+import { getAuth, connectAuthEmulator, inMemoryPersistence, setPersistence } from 'firebase/auth';
 import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
-import { getDatabase, connectDatabaseEmulator } from 'firebase/database';
+import { getStorage, connectStorageEmulator } from 'firebase/storage';
 
+// Firebase yapılandırması
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -17,24 +18,33 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 
 // Servisleri başlat
-const auth = getAuth(app);
-const db = getFirestore(app);
-const database = getDatabase(app);
+export const auth = getAuth(app);
+export const db = getFirestore(app);
+export const storage = getStorage(app);
 
-// Development modunda emülatörlere bağlan
+// Geliştirme ortamında emülatörleri kullan
 if (import.meta.env.DEV) {
   try {
-    console.log('Firebase Emülatörlerine bağlanılıyor...');
+    // Auth emülatörünü bağla
+    connectAuthEmulator(auth, 'http://localhost:9099', { disableWarnings: true });
+    console.log('✅ Auth Emulator bağlandı: http://localhost:9099');
     
-    // Emülatörlere bağlan
-    connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
-    connectFirestoreEmulator(db, '127.0.0.1', 8080);
-    connectDatabaseEmulator(database, '127.0.0.1', 9000);
+    // Oturum yönetimini hafızada tut
+    setPersistence(auth, inMemoryPersistence)
+      .then(() => console.log('✅ Auth persistence ayarlandı'))
+      .catch(error => console.error('❌ Auth persistence hatası:', error));
     
-    console.log('Tüm emülatör bağlantıları başarılı!');
+    // Firestore emülatörünü bağla
+    connectFirestoreEmulator(db, 'localhost', 8080);
+    console.log('✅ Firestore Emulator bağlandı: http://localhost:8080');
+    
+    // Storage emülatörünü bağla
+    connectStorageEmulator(storage, 'localhost', 9199);
+    console.log('✅ Storage Emulator bağlandı: http://localhost:9199');
   } catch (error) {
-    console.error('Emülatör bağlantısında hata:', error);
+    console.error('❌ Firebase emülatör bağlantı hatası:', error);
+    console.warn('⚠️ Emülatör bağlantısı başarısız oldu, production modunda devam ediliyor');
   }
 }
 
-export { auth, db, database }; 
+export default app; 
