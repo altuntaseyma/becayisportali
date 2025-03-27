@@ -1,41 +1,67 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { verificationService } from '../services/verificationService';
 import {
   UserGroupIcon,
   NewspaperIcon,
   UserIcon,
   ArrowPathIcon,
-  ChatBubbleLeftRightIcon
+  ChatBubbleLeftRightIcon,
+  ExclamationTriangleIcon,
+  ShieldCheckIcon
 } from '@heroicons/react/24/outline';
 
 export default function Home() {
   const { currentUser } = useAuth();
+  const [isVerified, setIsVerified] = useState<boolean | null>(null);
+  const [verificationLoading, setVerificationLoading] = useState(true);
+
+  useEffect(() => {
+    const checkVerification = async () => {
+      if (currentUser) {
+        try {
+          const status = await verificationService.getVerificationStatus(currentUser.uid);
+          setIsVerified(status.isVerified);
+        } catch (error) {
+          console.error('Doğrulama durumu kontrol edilirken hata:', error);
+          setIsVerified(false);
+        }
+      }
+      setVerificationLoading(false);
+    };
+
+    checkVerification();
+  }, [currentUser]);
 
   const features = [
     {
       name: 'Becayiş İstekleri',
       description: 'Mevcut becayiş isteklerini görüntüleyin ve yeni istek oluşturun',
       icon: ArrowPathIcon,
-      href: '/exchange'
+      href: '/exchange',
+      requiresVerification: true
     },
     {
       name: 'Forum',
       description: 'Diğer memurlarla iletişime geçin, sorularınızı sorun',
       icon: ChatBubbleLeftRightIcon,
-      href: '/forum'
+      href: '/forum',
+      requiresVerification: true
     },
     {
       name: 'Memur Haberleri',
       description: 'Güncel memur haberlerini takip edin',
       icon: NewspaperIcon,
-      href: '/news'
+      href: '/news',
+      requiresVerification: true
     },
     {
       name: 'Eşleşmeler',
       description: 'Size uygun becayiş eşleşmelerini görüntüleyin',
       icon: UserGroupIcon,
-      href: '/matches'
+      href: '/matches',
+      requiresVerification: true
     }
   ];
 
@@ -100,6 +126,61 @@ export default function Home() {
               <p className="mt-3 max-w-md mx-auto text-base text-gray-500 sm:text-lg md:mt-5 md:text-xl md:max-w-3xl">
                 Türkiye'nin en büyük memur becayiş platformuna hoş geldiniz. Hayalinizdeki şehirde çalışmak için hemen becayiş isteği oluşturun.
               </p>
+
+              {currentUser && !verificationLoading && !isVerified && (
+                <div className="mt-6 max-w-md mx-auto">
+                  <div className="rounded-md bg-yellow-50 p-4">
+                    <div className="flex">
+                      <div className="flex-shrink-0">
+                        <ExclamationTriangleIcon className="h-5 w-5 text-yellow-400" aria-hidden="true" />
+                      </div>
+                      <div className="ml-3">
+                        <h3 className="text-sm font-medium text-yellow-800">
+                          Kimlik Doğrulaması Gerekli
+                        </h3>
+                        <div className="mt-2 text-sm text-yellow-700">
+                          <p>
+                            Platform özelliklerini kullanabilmek için kimlik doğrulaması yapmanız gerekmektedir.
+                          </p>
+                        </div>
+                        <div className="mt-4">
+                          <div className="-mx-2 -my-1.5 flex">
+                            <Link
+                              to="/profile"
+                              className="bg-yellow-50 px-2 py-1.5 rounded-md text-sm font-medium text-yellow-800 hover:bg-yellow-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-yellow-50 focus:ring-yellow-600"
+                            >
+                              Kimlik Doğrulamaya Git
+                            </Link>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {currentUser && !verificationLoading && isVerified && (
+                <div className="mt-6 max-w-md mx-auto">
+                  <div className="rounded-md bg-green-50 p-4">
+                    <div className="flex">
+                      <div className="flex-shrink-0">
+                        <ShieldCheckIcon className="h-5 w-5 text-green-400" aria-hidden="true" />
+                      </div>
+                      <div className="ml-3">
+                        <h3 className="text-sm font-medium text-green-800">
+                          Kimlik Doğrulaması Tamamlandı
+                        </h3>
+                        <div className="mt-2 text-sm text-green-700">
+                          <p>
+                            Platformun tüm özelliklerini kullanabilirsiniz.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="mt-5 max-w-md mx-auto sm:flex sm:justify-center md:mt-8">
                 {!currentUser ? (
                   <>
@@ -123,10 +204,10 @@ export default function Home() {
                 ) : (
                   <div className="rounded-md shadow">
                     <Link
-                      to="/exchange"
+                      to={isVerified ? "/exchange" : "/profile"}
                       className="w-full flex items-center justify-center px-8 py-3 border border-transparent text-base font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 md:py-4 md:text-lg md:px-10"
                     >
-                      Becayiş İsteği Oluştur
+                      {isVerified ? 'Becayiş İsteği Oluştur' : 'Kimlik Doğrulamaya Git'}
                     </Link>
                   </div>
                 )}
@@ -149,23 +230,38 @@ export default function Home() {
           <div className="mt-12">
             <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-4">
               {features.map((feature) => (
-                <Link
+                <div
                   key={feature.name}
-                  to={feature.href}
-                  className="pt-6 transform hover:scale-105 transition-transform duration-200"
+                  className={`pt-6 ${
+                    currentUser && feature.requiresVerification && !isVerified
+                      ? 'opacity-50 cursor-not-allowed'
+                      : 'transform hover:scale-105 transition-transform duration-200'
+                  }`}
                 >
-                  <div className="flow-root rounded-lg bg-gray-50 px-6 pb-8">
-                    <div className="-mt-6">
-                      <div>
-                        <span className="inline-flex items-center justify-center rounded-md bg-blue-500 p-3 shadow-lg">
-                          <feature.icon className="h-6 w-6 text-white" aria-hidden="true" />
-                        </span>
+                  <Link
+                    to={currentUser && feature.requiresVerification && !isVerified ? '/profile' : feature.href}
+                    className="block"
+                  >
+                    <div className="flow-root rounded-lg bg-gray-50 px-6 pb-8">
+                      <div className="-mt-6">
+                        <div>
+                          <span className="inline-flex items-center justify-center rounded-md bg-blue-500 p-3 shadow-lg">
+                            <feature.icon className="h-6 w-6 text-white" aria-hidden="true" />
+                          </span>
+                        </div>
+                        <h3 className="mt-8 text-lg font-medium text-gray-900 tracking-tight">
+                          {feature.name}
+                          {currentUser && feature.requiresVerification && !isVerified && (
+                            <span className="ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                              Doğrulama Gerekli
+                            </span>
+                          )}
+                        </h3>
+                        <p className="mt-5 text-base text-gray-500">{feature.description}</p>
                       </div>
-                      <h3 className="mt-8 text-lg font-medium text-gray-900 tracking-tight">{feature.name}</h3>
-                      <p className="mt-5 text-base text-gray-500">{feature.description}</p>
                     </div>
-                  </div>
-                </Link>
+                  </Link>
+                </div>
               ))}
             </div>
           </div>

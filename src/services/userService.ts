@@ -1,115 +1,126 @@
 import { db } from '../config/firebase';
-import { collection, doc, getDoc, setDoc, updateDoc, getDocs, Timestamp } from 'firebase/firestore';
+import {
+  doc,
+  getDoc,
+  setDoc,
+  updateDoc,
+  Timestamp,
+  collection,
+  query,
+  where,
+  getDocs
+} from 'firebase/firestore';
 import { User } from '../types/database';
 
-const USERS_COLLECTION = 'users';
+class UserService {
+  private collection = 'users';
 
-export const userService = {
-  async createUser(userId: string, userData: Partial<User>): Promise<void> {
-    const user = {
-      id: userId,
-      name: userData.name || '',
-      email: userData.email || '',
-      department: userData.department || '',
-      institution: userData.institution || '',
-      location: userData.location || { il: '', ilce: '' },
-      photoURL: userData.photoURL || null,
-      createdAt: Timestamp.now().toDate(),
-      updatedAt: Timestamp.now().toDate()
-    } as User;
-
-    // undefined değerleri temizle
-    Object.keys(user).forEach(key => {
-      if (user[key as keyof User] === undefined) {
-        user[key as keyof User] = null;
-      }
-    });
-
-    const userForFirestore = {
-      ...user,
-      createdAt: Timestamp.now(),
-      updatedAt: Timestamp.now()
-    };
-
-    await setDoc(doc(db, USERS_COLLECTION, userId), userForFirestore);
-  },
-
-  async getUser(userId: string): Promise<User | null> {
-    const userDoc = await getDoc(doc(db, USERS_COLLECTION, userId));
-    if (!userDoc.exists()) return null;
-
-    const data = userDoc.data();
-    return {
-      ...data,
-      id: userDoc.id,
-      createdAt: data.createdAt.toDate(),
-      updatedAt: data.updatedAt.toDate()
-    } as User;
-  },
-
-  async updateUser(userId: string, userData: Partial<User>): Promise<void> {
-    const updateData = {
-      ...userData,
-      updatedAt: Timestamp.now()
-    };
-
-    // undefined değerleri temizle
-    Object.keys(updateData).forEach(key => {
-      if (updateData[key as keyof typeof updateData] === undefined) {
-        delete updateData[key as keyof typeof updateData];
-      }
-    });
-
-    await updateDoc(doc(db, USERS_COLLECTION, userId), updateData);
-  },
-
-  async updateUserLocation(userId: string, locationString: string): Promise<void> {
+  async createUser(userId: string, data: Partial<User>): Promise<void> {
     try {
-      if (!locationString || !locationString.includes(',')) {
-        throw new Error('Geçersiz konum formatı');
-      }
-
-      const parts = locationString.split(',');
-      if (parts.length !== 2) {
-        throw new Error('Geçersiz konum formatı');
-      }
-
-      const [il, ilce] = parts.map(str => str.trim()).filter(str => str.length > 0);
-      
-      if (!il || !ilce) {
-        throw new Error('Geçersiz il veya ilçe');
-      }
-
-      await this.updateUser(userId, {
-        location: {
-          il,
-          ilce
-        }
+      const userRef = doc(db, this.collection, userId);
+      await setDoc(userRef, {
+        ...data,
+        phoneVerified: false,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now()
       });
     } catch (error) {
-      console.error('Error updating user location:', error);
-      throw error;
-    }
-  },
-
-  async migrateUserLocations(): Promise<void> {
-    try {
-      const querySnapshot = await getDocs(collection(db, USERS_COLLECTION));
-      const updatePromises: Promise<void>[] = [];
-
-      querySnapshot.docs.forEach((doc) => {
-        const userData = doc.data();
-        if (userData && typeof userData.location === 'string' && userData.location.includes(',')) {
-          updatePromises.push(this.updateUserLocation(doc.id, userData.location));
-        }
-      });
-
-      if (updatePromises.length > 0) {
-        await Promise.all(updatePromises);
-      }
-    } catch (error) {
-      console.error('Error migrating user locations:', error);
+      console.error('Error creating user:', error);
       throw error;
     }
   }
-}; 
+
+  async getUser(userId: string): Promise<User | null> {
+    try {
+      const userRef = doc(db, this.collection, userId);
+      const userSnap = await getDoc(userRef);
+      
+      if (!userSnap.exists()) {
+        return null;
+      }
+
+      return {
+        id: userSnap.id,
+        ...userSnap.data(),
+        createdAt: userSnap.data().createdAt.toDate(),
+        updatedAt: userSnap.data().updatedAt.toDate(),
+        startDate: userSnap.data().startDate?.toDate()
+      } as User;
+    } catch (error) {
+      console.error('Error getting user:', error);
+      throw error;
+    }
+  }
+
+  async updateUser(userId: string, data: Partial<User>): Promise<void> {
+    try {
+      const userRef = doc(db, this.collection, userId);
+      await updateDoc(userRef, {
+        ...data,
+        updatedAt: Timestamp.now()
+      });
+    } catch (error) {
+      console.error('Error updating user:', error);
+      throw error;
+    }
+  }
+
+  async verifyPhone(userId: string, phoneNumber: string): Promise<void> {
+    try {
+      const userRef = doc(db, this.collection, userId);
+      await updateDoc(userRef, {
+        phoneNumber,
+        phoneVerified: true,
+        updatedAt: Timestamp.now()
+      });
+    } catch (error) {
+      console.error('Error verifying phone:', error);
+      throw error;
+    }
+  }
+
+  async findPotentialMatches(user: User): Promise<User[]> {
+    try {
+      // Aynı kurum ve hizmet sınıfındaki kullanıcıları bul
+      const q = query(
+        collection(db, this.collection),
+        where('institution', '==', user.institution),
+        where('serviceClass', '==', user.serviceClass),
+        where('position', '==', user.position)
+      );
+
+      const querySnapshot = await getDocs(q);
+      return querySnapshot.docs
+        .map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+          createdAt: doc.data().createdAt.toDate(),
+          updatedAt: doc.data().updatedAt.toDate(),
+          startDate: doc.data().startDate?.toDate()
+        }))
+        .filter(potentialMatch => 
+          potentialMatch.id !== user.id && // Kendisi hariç
+          this.isValidMatch(user, potentialMatch as User)
+        ) as User[];
+    } catch (error) {
+      console.error('Error finding potential matches:', error);
+      throw error;
+    }
+  }
+
+  private isValidMatch(user1: User, user2: User): boolean {
+    // Sağlık Bakanlığı çalışanları için özel kontrol
+    if (user1.institution === 'Sağlık Bakanlığı') {
+      return user1.location.region === user2.location.region;
+    }
+
+    // Diğer kurumlar için genel kontrol
+    return (
+      user1.institution === user2.institution && // Aynı kurum
+      user1.serviceClass === user2.serviceClass && // Aynı hizmet sınıfı
+      user1.position === user2.position // Aynı pozisyon
+    );
+  }
+}
+
+export const userService = new UserService(); 
