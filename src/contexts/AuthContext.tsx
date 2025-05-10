@@ -4,29 +4,22 @@ import {
   signInWithEmailAndPassword, 
   signOut, 
   onAuthStateChanged,
-  User as FirebaseUser 
+  User as FirebaseUser,
+  setPersistence,
+  browserLocalPersistence
 } from 'firebase/auth';
-import { auth } from '../config/firebase';
-import { userService } from '../services/userService';
-import { User } from '../types/database';
+import { auth } from '../services/firebase/config';
+import { userService } from '../services/firebase/userService';
+import { User } from '../types/user';
 
 interface AuthContextType {
   currentUser: FirebaseUser | null;
   currentUserData: User | null;
   login: (email: string, password: string) => Promise<void>;
-  register: (formData: RegisterFormData) => Promise<void>;
+  register: (email: string, password: string, userData: Partial<User>) => Promise<void>;
   logout: () => Promise<void>;
   loading: boolean;
-}
-
-interface RegisterFormData {
-  fullName: string;
-  email: string;
-  kurumKategorisi: string;
-  kurumTuru: string;
-  il: string;
-  ilce: string;
-  password: string;
+  error: string | null;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -43,62 +36,75 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const [currentUserData, setCurrentUserData] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // Oturum kalıcılığını ayarla
+    setPersistence(auth, browserLocalPersistence).catch((error) => {
+      console.error('Oturum kalıcılığı ayarlanırken hata:', error);
+    });
+
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       try {
+        setLoading(true);
+        setError(null);
         setCurrentUser(user);
+        
         if (user) {
-          const userData = await userService.getUser(user.uid);
-          setCurrentUserData(userData);
+          try {
+            const userData = await userService.getUser(user.uid);
+            setCurrentUserData(userData);
+          } catch (error) {
+            console.error('Kullanıcı verisi alınırken hata:', error);
+            setError('Kullanıcı bilgileri yüklenirken bir hata oluştu');
+          }
         } else {
           setCurrentUserData(null);
         }
       } catch (error) {
-        console.error('Auth state change error:', error);
+        console.error('Auth state değişikliği hatası:', error);
+        setError('Oturum durumu kontrol edilirken bir hata oluştu');
+        setCurrentUserData(null);
       } finally {
         setLoading(false);
       }
     });
 
-    return unsubscribe;
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
-  async function register(formData: RegisterFormData) {
+  async function register(email: string, password: string, userData: Partial<User>) {
     try {
-      const { email, password, ...userData } = formData;
+      setError(null);
       const { user } = await createUserWithEmailAndPassword(auth, email, password);
-      
-      await userService.createUser(user.uid, {
-        name: userData.fullName,
-        email: user.email || '',
-        department: userData.kurumKategorisi,
-        institution: userData.kurumTuru,
-        location: {
-          il: userData.il,
-          ilce: userData.ilce
-        }
-      });
-    } catch (error) {
-      console.error('Registration error:', error);
+      await userService.createUser(user.uid, userData);
+    } catch (error: any) {
+      console.error('Kayıt hatası:', error);
+      setError(error.message || 'Kayıt işlemi sırasında bir hata oluştu');
       throw error;
     }
   }
 
   async function login(email: string, password: string) {
     try {
+      setError(null);
       await signInWithEmailAndPassword(auth, email, password);
-    } catch (error) {
-      console.error('Login error:', error);
+    } catch (error: any) {
+      console.error('Giriş hatası:', error);
+      setError(error.message || 'Giriş yapılırken bir hata oluştu');
       throw error;
     }
   }
 
   async function logout() {
     try {
+      setError(null);
       await signOut(auth);
-    } catch (error) {
-      console.error('Logout error:', error);
+    } catch (error: any) {
+      console.error('Çıkış hatası:', error);
+      setError(error.message || 'Çıkış yapılırken bir hata oluştu');
       throw error;
     }
   }
@@ -109,12 +115,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     login,
     register,
     logout,
-    loading
+    loading,
+    error
   };
 
   return (
     <AuthContext.Provider value={value}>
-      {children}
+      {!loading && children}
     </AuthContext.Provider>
   );
 } 

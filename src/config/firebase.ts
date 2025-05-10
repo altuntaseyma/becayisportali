@@ -26,8 +26,8 @@ export const storage = getStorage(app);
 if (import.meta.env.DEV) {
   try {
     // Auth emülatörünü bağla
-    connectAuthEmulator(auth, 'http://localhost:9099', { disableWarnings: true });
-    console.log('✅ Auth Emulator bağlandı: http://localhost:9099');
+    connectAuthEmulator(auth, 'http://localhost:9100', { disableWarnings: true });
+    console.log('✅ Auth Emulator bağlandı: http://localhost:9100');
     
     // Oturum yönetimini hafızada tut
     setPersistence(auth, inMemoryPersistence)
@@ -35,8 +35,8 @@ if (import.meta.env.DEV) {
       .catch(error => console.error('❌ Auth persistence hatası:', error));
     
     // Firestore emülatörünü bağla
-    connectFirestoreEmulator(db, 'localhost', 8080);
-    console.log('✅ Firestore Emulator bağlandı: http://localhost:8080');
+    connectFirestoreEmulator(db, 'localhost', 8083);
+    console.log('✅ Firestore Emulator bağlandı: http://localhost:8083');
     
     // Storage emülatörünü bağla
     connectStorageEmulator(storage, 'localhost', 9199);

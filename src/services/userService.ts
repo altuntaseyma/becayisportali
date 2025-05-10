@@ -8,7 +8,8 @@ import {
   collection,
   query,
   where,
-  getDocs
+  getDocs,
+  serverTimestamp
 } from 'firebase/firestore';
 import { User } from '../types/database';
 
@@ -17,13 +18,28 @@ class UserService {
 
   async createUser(userId: string, data: Partial<User>): Promise<void> {
     try {
+      // undefined değerleri temizle
+      const cleanedData = Object.fromEntries(
+        Object.entries(data).filter(([_, v]) => v !== undefined)
+      );
+
       const userRef = doc(db, this.collection, userId);
-      await setDoc(userRef, {
-        ...data,
+      const userDataToSave = {
+        ...cleanedData,
         phoneVerified: false,
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now()
-      });
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      };
+
+      console.log('Firestore\'a kaydedilecek veri:', userDataToSave);
+
+      await setDoc(userRef, userDataToSave);
+
+      // Kayıt sonrası kontrol
+      const savedDoc = await getDoc(userRef);
+      if (!savedDoc.exists()) {
+        throw new Error('Document was not created successfully');
+      }
     } catch (error) {
       console.error('Error creating user:', error);
       throw error;
@@ -39,13 +55,23 @@ class UserService {
         return null;
       }
 
+      const data = userSnap.data() || {};
       return {
         id: userSnap.id,
-        ...userSnap.data(),
-        createdAt: userSnap.data().createdAt.toDate(),
-        updatedAt: userSnap.data().updatedAt.toDate(),
-        startDate: userSnap.data().startDate?.toDate()
-      } as User;
+        fullName: data.fullName || '',
+        email: data.email || '',
+        institution: data.institution || '',
+        department: data.department || '',
+        title: data.title || '',
+        location: data.location || { il: '', ilce: '' },
+        isVerified: data.isVerified ?? false,
+        verificationStatus: data.verificationStatus || 'not_submitted',
+        verificationDate: data.verificationDate ? (data.verificationDate.toDate ? data.verificationDate.toDate() : data.verificationDate) : undefined,
+        idCardFront: data.idCardFront,
+        idCardBack: data.idCardBack,
+        createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : (data.createdAt || new Date()),
+        updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate() : (data.updatedAt || new Date())
+      };
     } catch (error) {
       console.error('Error getting user:', error);
       throw error;
@@ -81,27 +107,34 @@ class UserService {
 
   async findPotentialMatches(user: User): Promise<User[]> {
     try {
-      // Aynı kurum ve hizmet sınıfındaki kullanıcıları bul
+      // Sadece aynı kurumda olanları bul
       const q = query(
         collection(db, this.collection),
-        where('institution', '==', user.institution),
-        where('serviceClass', '==', user.serviceClass),
-        where('position', '==', user.position)
+        where('institution', '==', user.institution)
       );
 
       const querySnapshot = await getDocs(q);
       return querySnapshot.docs
-        .map(doc => ({
-          id: doc.id,
-          ...doc.data(),
-          createdAt: doc.data().createdAt.toDate(),
-          updatedAt: doc.data().updatedAt.toDate(),
-          startDate: doc.data().startDate?.toDate()
-        }))
-        .filter(potentialMatch => 
-          potentialMatch.id !== user.id && // Kendisi hariç
-          this.isValidMatch(user, potentialMatch as User)
-        ) as User[];
+        .map(doc => {
+          const data = doc.data() || {};
+          return {
+            id: doc.id,
+            fullName: data.fullName || '',
+            email: data.email || '',
+            institution: data.institution || '',
+            department: data.department || '',
+            title: data.title || '',
+            location: data.location || { il: '', ilce: '' },
+            isVerified: data.isVerified ?? false,
+            verificationStatus: data.verificationStatus || 'not_submitted',
+            verificationDate: data.verificationDate ? (data.verificationDate.toDate ? data.verificationDate.toDate() : data.verificationDate) : undefined,
+            idCardFront: data.idCardFront,
+            idCardBack: data.idCardBack,
+            createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : (data.createdAt || new Date()),
+            updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate() : (data.updatedAt || new Date())
+          };
+        })
+        .filter(potentialMatch => potentialMatch.id !== user.id);
     } catch (error) {
       console.error('Error finding potential matches:', error);
       throw error;
@@ -109,17 +142,7 @@ class UserService {
   }
 
   private isValidMatch(user1: User, user2: User): boolean {
-    // Sağlık Bakanlığı çalışanları için özel kontrol
-    if (user1.institution === 'Sağlık Bakanlığı') {
-      return user1.location.region === user2.location.region;
-    }
-
-    // Diğer kurumlar için genel kontrol
-    return (
-      user1.institution === user2.institution && // Aynı kurum
-      user1.serviceClass === user2.serviceClass && // Aynı hizmet sınıfı
-      user1.position === user2.position // Aynı pozisyon
-    );
+    return user1.institution === user2.institution;
   }
 }
 

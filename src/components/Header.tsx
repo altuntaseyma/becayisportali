@@ -6,7 +6,8 @@ import { useAuth } from '../contexts/AuthContext';
 
 const navigation = [
   { name: 'Ana Sayfa', href: '/' },
-  { name: 'Becayiş İstekleri', href: '/exchange' },
+  { name: 'Becayiş İstekleri', href: '/exchange-requests' },
+  { name: 'Becayiş Taleplerim', href: '/exchange' },
   { name: 'Forum', href: '/forum' },
   { name: 'Memur Haberleri', href: '/news' },
   { name: 'Eşleşmeler', href: '/matches' }
@@ -91,6 +92,19 @@ export default function Header() {
                         </Menu.Item>
                         <Menu.Item>
                           {({ active }) => (
+                            <Link
+                              to="/exchange"
+                              className={classNames(
+                                active ? 'bg-gray-100' : '',
+                                'block px-4 py-2 text-sm text-gray-700'
+                              )}
+                            >
+                              Becayiş Taleplerim
+                            </Link>
+                          )}
+                        </Menu.Item>
+                        <Menu.Item>
+                          {({ active }) => (
                             <button
                               onClick={handleLogout}
                               className={classNames(
@@ -169,6 +183,12 @@ export default function Header() {
                     className="block px-4 py-2 text-base font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-800"
                   >
                     Profilim
+                  </Link>
+                  <Link
+                    to="/exchange"
+                    className="block px-4 py-2 text-base font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-800"
+                  >
+                    Becayiş Taleplerim
                   </Link>
                   <button
                     onClick={handleLogout}

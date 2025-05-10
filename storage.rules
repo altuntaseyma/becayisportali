@@ -5,12 +5,46 @@ rules_version = '2';
 //    /databases/(default)/documents/users/$(request.auth.uid)).data.isAdmin;
 service firebase.storage {
   match /b/{bucket}/o {
+    // Yardımcı fonksiyonlar
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isValidImage() {
+      return request.resource.contentType.matches('image/.*') &&
+             request.resource.size < 5 * 1024 * 1024;
+    }
+
+    // Doğrulama belgeleri için kurallar
     match /verification/{userId}/{fileName} {
-      allow read: if request.auth != null && request.auth.uid == userId;
-      allow write: if request.auth != null && 
-                  request.auth.uid == userId && 
-                  request.resource.size < 5 * 1024 * 1024 && // 5MB limit
-                  request.resource.contentType.matches('image/.*');
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && 
+                   isValidImage() &&
+                   fileName.matches('^[^/]+\\.(jpg|jpeg|png|gif)$');
+      allow delete: if isOwner(userId);
+    }
+    
+    // Profil fotoğrafları için kurallar
+    match /profilePhotos/{userId}/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner(userId) && 
+                  isValidImage() &&
+                  fileName.matches('^[^/]+\\.(jpg|jpeg|png)$');
+    }
+    
+    // Forum görselleri için kurallar
+    match /forumImages/{postId}/{fileName} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && 
+                   isValidImage() &&
+                   fileName.matches('^[^/]+\\.(jpg|jpeg|png|gif)$');
+      allow delete: if request.auth != null && 
+                   exists(/databases/$(database)/documents/forumPosts/$(postId)) &&
+                   get(/databases/$(database)/documents/forumPosts/$(postId)).data.userId == request.auth.uid;
     }
   }
 }

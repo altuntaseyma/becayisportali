@@ -1,140 +1,164 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { collection, query, where, getDocs } from 'firebase/firestore';
-import { db } from '../config/firebase';
+import { userService } from '../services/firebase/userService';
+import { User } from '../types/user';
+import LoadingSpinner from '../components/LoadingSpinner';
 import Header from '../components/Header';
+import { exchangeService } from '../services/exchangeService';
 
-interface UserData {
-  email: string;
-  kurum: string;
-  sehir: string;
-  hedefSehirler: string[];
-}
-
-export default function Dashboard() {
+const Dashboard: React.FC = () => {
   const { currentUser } = useAuth();
-  const [userData, setUserData] = useState<UserData | null>(null);
-  const [potentialMatches, setPotentialMatches] = useState<any[]>([]);
+  const [userData, setUserData] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [batchResult, setBatchResult] = useState<string | null>(null);
+  const [batchLoading, setBatchLoading] = useState(false);
 
   useEffect(() => {
     const fetchUserData = async () => {
-      if (currentUser) {
-        try {
-          const userDoc = await getDocs(query(
-            collection(db, 'users'),
-            where('email', '==', currentUser.email)
-          ));
-
-          if (!userDoc.empty) {
-            const userData = userDoc.docs[0].data() as UserData;
-            setUserData(userData);
-
-            // Potansiyel eşleşmeleri bul
-            const matchesQuery = query(
-              collection(db, 'users'),
-              where('sehir', 'in', userData.hedefSehirler),
-              where('hedefSehirler', 'array-contains', userData.sehir)
-            );
-
-            const matchesSnapshot = await getDocs(matchesQuery);
-            const matches = matchesSnapshot.docs.map(doc => ({
-              id: doc.id,
-              ...doc.data()
-            }));
-
-            setPotentialMatches(matches);
-          }
-        } catch (error) {
-          console.error('Veri çekilirken hata oluştu:', error);
-        }
+      if (!currentUser) {
+        setLoading(false);
+        return;
       }
-      setLoading(false);
+
+      try {
+        const data = await userService.getUser(currentUser.uid);
+        setUserData(data);
+      } catch (err) {
+        console.error('Kullanıcı bilgileri alınamadı:', err);
+        setError('Kullanıcı bilgileri yüklenirken bir hata oluştu.');
+      } finally {
+        setLoading(false);
+      }
     };
 
     fetchUserData();
   }, [currentUser]);
 
+  const handleBatchMatch = async () => {
+    setBatchLoading(true);
+    setBatchResult(null);
+    try {
+      await exchangeService.runBatchMatchingForAllRequests();
+      setBatchResult('Toplu eşleşme başarıyla tamamlandı!');
+    } catch (err) {
+      setBatchResult('Bir hata oluştu: ' + (err as Error).message);
+    } finally {
+      setBatchLoading(false);
+    }
+  };
+
   if (loading) {
-    return <div>Yükleniyor...</div>;
+    return <LoadingSpinner fullScreen />;
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="bg-white p-8 rounded-lg shadow-md">
+          <h2 className="text-red-600 text-xl font-semibold mb-4">Hata</h2>
+          <p className="text-gray-600">{error}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!userData) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="bg-white p-8 rounded-lg shadow-md">
+          <h2 className="text-gray-900 text-xl font-semibold mb-4">Kullanıcı Bulunamadı</h2>
+          <p className="text-gray-600">Kullanıcı bilgilerinize ulaşılamadı. Lütfen tekrar giriş yapın.</p>
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="min-h-screen bg-gray-50">
       <Header />
       
       <main className="py-10">
         <div className="max-w-7xl mx-auto sm:px-6 lg:px-8">
-          {/* Profil Bilgileri */}
-          <div className="bg-white shadow overflow-hidden sm:rounded-lg mb-6">
+          <div className="bg-white shadow overflow-hidden sm:rounded-lg">
             <div className="px-4 py-5 sm:px-6">
               <h3 className="text-lg leading-6 font-medium text-gray-900">
                 Profil Bilgileri
               </h3>
+              <p className="mt-1 max-w-2xl text-sm text-gray-500">
+                Kişisel ve kurumsal bilgileriniz
+              </p>
             </div>
-            <div className="border-t border-gray-200 px-4 py-5 sm:px-6">
-              <dl className="grid grid-cols-1 gap-x-4 gap-y-8 sm:grid-cols-2">
-                <div className="sm:col-span-1">
-                  <dt className="text-sm font-medium text-gray-500">Email</dt>
-                  <dd className="mt-1 text-sm text-gray-900">{userData?.email}</dd>
-                </div>
-                <div className="sm:col-span-1">
-                  <dt className="text-sm font-medium text-gray-500">Kurum</dt>
-                  <dd className="mt-1 text-sm text-gray-900">{userData?.kurum}</dd>
-                </div>
-                <div className="sm:col-span-1">
-                  <dt className="text-sm font-medium text-gray-500">Bulunduğu Şehir</dt>
-                  <dd className="mt-1 text-sm text-gray-900">{userData?.sehir}</dd>
-                </div>
-                <div className="sm:col-span-1">
-                  <dt className="text-sm font-medium text-gray-500">Hedef Şehirler</dt>
-                  <dd className="mt-1 text-sm text-gray-900">
-                    {userData?.hedefSehirler.join(', ') || 'Hedef şehir belirtilmemiş'}
+            <div className="border-t border-gray-200">
+              <dl>
+                <div className="bg-gray-50 px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
+                  <dt className="text-sm font-medium text-gray-500">Ad Soyad</dt>
+                  <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
+                    {userData.displayName}
                   </dd>
                 </div>
+                <div className="bg-white px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
+                  <dt className="text-sm font-medium text-gray-500">E-posta</dt>
+                  <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
+                    {userData.email}
+                  </dd>
+                </div>
+                <div className="bg-gray-50 px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
+                  <dt className="text-sm font-medium text-gray-500">Kurum Kategorisi</dt>
+                  <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
+                    {userData.institutionCategory}
+                  </dd>
+                </div>
+                <div className="bg-white px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
+                  <dt className="text-sm font-medium text-gray-500">Kurum</dt>
+                  <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
+                    {userData.institution}
+                  </dd>
+                </div>
+                <div className="bg-gray-50 px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
+                  <dt className="text-sm font-medium text-gray-500">Mevcut Konum</dt>
+                  <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
+                    {userData.currentLocation?.city}, {userData.currentLocation?.district}
+                  </dd>
+                </div>
+                {userData.desiredLocations && userData.desiredLocations.length > 0 && (
+                  <div className="bg-white px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
+                    <dt className="text-sm font-medium text-gray-500">Tercih Edilen Konumlar</dt>
+                    <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
+                      {userData.desiredLocations.map(loc => `${loc.city}, ${loc.district}`).join('; ')}
+                    </dd>
+                  </div>
+                )}
               </dl>
             </div>
           </div>
-
-          {/* Potansiyel Eşleşmeler */}
-          <div className="bg-white shadow overflow-hidden sm:rounded-lg">
-            <div className="px-4 py-5 sm:px-6">
-              <h3 className="text-lg leading-6 font-medium text-gray-900">
-                Potansiyel Becayiş Eşleşmeleri
-              </h3>
-            </div>
-            <div className="border-t border-gray-200">
-              {potentialMatches.length > 0 ? (
-                <ul className="divide-y divide-gray-200">
-                  {potentialMatches.map((match) => (
-                    <li key={match.id} className="px-4 py-4 sm:px-6">
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-indigo-600 truncate">
-                            {match.kurum}
-                          </p>
-                          <p className="text-sm text-gray-500">
-                            {match.sehir} → {userData?.sehir}
-                          </p>
-                        </div>
-                        <div>
-                          <button className="btn-primary">
-                            İletişime Geç
-                          </button>
-                        </div>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <div className="px-4 py-5 sm:px-6 text-center text-gray-500">
-                  Henüz bir eşleşme bulunamadı.
-                </div>
-              )}
-            </div>
+          <div style={{ margin: '2rem 0' }}>
+            <button
+              onClick={handleBatchMatch}
+              disabled={batchLoading}
+              style={{
+                padding: '10px 20px',
+                background: '#2563eb',
+                color: 'white',
+                border: 'none',
+                borderRadius: '5px',
+                cursor: batchLoading ? 'not-allowed' : 'pointer',
+                fontWeight: 'bold',
+                fontSize: '16px'
+              }}
+            >
+              {batchLoading ? 'Eşleşmeler Yapılıyor...' : 'Tüm Aktif Becayişler İçin Toplu Eşleşme Yap'}
+            </button>
+            {batchResult && (
+              <div style={{ marginTop: '1rem', color: batchResult.startsWith('Bir hata') ? 'red' : 'green' }}>
+                {batchResult}
+              </div>
+            )}
           </div>
         </div>
       </main>
     </div>
   );
-} 
+};
+
+export default Dashboard; 

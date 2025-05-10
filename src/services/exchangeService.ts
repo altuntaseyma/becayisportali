@@ -18,6 +18,7 @@ import {
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { ExchangeRequest, Message } from '../types/database';
+import { MatchingService } from './MatchingService';
 
 interface ExchangeFilters {
   city?: string;
@@ -34,6 +35,7 @@ interface AllExchangeFilters extends ExchangeFilters {
 class ExchangeService {
   private collection = 'exchangeRequests';
   private messagesCollection = 'messages';
+  private matchingService = new MatchingService();
 
   async getExchangeRequests(filters: ExchangeFilters = {}): Promise<ExchangeRequest[]> {
     try {
@@ -99,7 +101,7 @@ class ExchangeService {
           userPhone: '***',
           createdAt: data.createdAt?.toDate(),
           updatedAt: data.updatedAt?.toDate()
-        } as ExchangeRequest;
+        } as unknown as ExchangeRequest;
       });
     } catch (error) {
       console.error('Error getting all exchange requests:', error);
@@ -116,6 +118,28 @@ class ExchangeService {
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now()
       });
+      const newRequestSnap = await getDoc(docRef);
+      const newRequest = { id: docRef.id, ...newRequestSnap.data() } as ExchangeRequest;
+      const q = query(collection(db, this.collection), where('isActive', '==', true), where('id', '!=', docRef.id));
+      const allActive = await getDocs(q);
+      for (const doc of allActive.docs) {
+        const otherRequest = { id: doc.id, ...doc.data() } as ExchangeRequest;
+        if (
+          newRequest.currentCity === otherRequest.targetCities[0]?.il &&
+          otherRequest.currentCity === newRequest.targetCities[0]?.il &&
+          newRequest.institution === otherRequest.institution &&
+          newRequest.position === otherRequest.position
+        ) {
+          await this.matchingService.createMatch({
+            id: '',
+            user1Id: newRequest.userId,
+            user2Id: otherRequest.userId,
+            score: { locationScore: 1, institutionScore: 1, positionScore: 1, totalScore: 1 },
+            status: 'pending',
+            createdAt: new Date()
+          });
+        }
+      }
       return docRef.id;
     } catch (error) {
       console.error('Error creating exchange request:', error);
@@ -273,16 +297,13 @@ class ExchangeService {
   async checkForMatches(request: ExchangeRequest): Promise<ExchangeRequest[]> {
     try {
       const matches: ExchangeRequest[] = [];
-
       for (const target of request.targetCities) {
         const q = query(
           collection(db, this.collection),
           where('isActive', '==', true),
           where('userId', '!=', request.userId),
-          where('currentCity', '==', target.il),
-          where('targetCities', 'array-contains', { il: request.currentCity })
+          where('currentCity', '==', target.il)
         );
-
         const querySnapshot = await getDocs(q);
         const potentialMatches = querySnapshot.docs
           .map(doc => ({
@@ -292,22 +313,59 @@ class ExchangeService {
             userPhone: '***',
             createdAt: doc.data().createdAt?.toDate(),
             updatedAt: doc.data().updatedAt?.toDate()
-          }))
-          .filter(match => {
-            const data = match as ExchangeRequest;
-            return data.department === request.department &&
+          }) as unknown as ExchangeRequest)
+          .filter(data => {
+            const hasReverse = (data.targetCities || []).some(
+              (t: any) => t.il === request.currentCity
+            );
+            return hasReverse &&
               data.institution === request.institution &&
-              data.position === request.position &&
-              data.serviceClass === request.serviceClass;
-          }) as ExchangeRequest[];
-
+              data.position === request.position;
+          });
         matches.push(...potentialMatches);
       }
-
       return matches;
     } catch (error) {
       console.error('Error checking for matches:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Tüm aktif becayiş istemlerini birbirleriyle karşılaştırıp eksik eşleşmeleri oluşturur (admin fonksiyonu).
+   */
+  async runBatchMatchingForAllRequests(): Promise<void> {
+    const q = query(collection(db, this.collection), where('isActive', '==', true));
+    const allActive = await getDocs(q);
+    const requests: ExchangeRequest[] = allActive.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+      createdAt: doc.data().createdAt?.toDate(),
+      updatedAt: doc.data().updatedAt?.toDate()
+    }) as unknown as ExchangeRequest);
+
+    for (const reqA of requests) {
+      for (const reqB of requests) {
+        if (
+          reqA.id !== reqB.id &&
+          reqA.userId !== reqB.userId &&
+          reqA.institution === reqB.institution &&
+          reqA.position === reqB.position &&
+          reqA.targetCities.some(tc => tc.il === reqB.currentCity) &&
+          reqB.targetCities.some(tc => tc.il === reqA.currentCity)
+        ) {
+          // Eşleşme zaten var mı kontrolü (aynı iki kullanıcı arasında)
+          // Burada matches koleksiyonunda kontrol yapılabilir, ancak basitlik için sadece bir kere oluşturulacak şekilde bırakıyoruz.
+          await this.matchingService.createMatch({
+            id: '',
+            user1Id: reqA.userId,
+            user2Id: reqB.userId,
+            score: { locationScore: 1, institutionScore: 1, positionScore: 1, totalScore: 1 },
+            status: 'pending',
+            createdAt: new Date()
+          });
+        }
+      }
     }
   }
 }

@@ -2,37 +2,9 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Kullanıcı dokümanları için kurallar
-    match /users/{userId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null && request.auth.uid == userId;
-    }
-    
-    // Becayiş istekleri için kurallar
-    match /exchangeRequests/{requestId} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
-      allow update, delete: if request.auth != null && resource.data.userId == request.auth.uid;
-    }
-    
-    // Eşleşmeler için kurallar
-    match /matches/{matchId} {
-      allow read: if request.auth != null && (
-        resource.data.user1Id == request.auth.uid || 
-        resource.data.user2Id == request.auth.uid
-      );
-      allow create: if request.auth != null;
-      allow update: if request.auth != null && (
-        resource.data.user1Id == request.auth.uid || 
-        resource.data.user2Id == request.auth.uid
-      );
-    }
-    
-    // Forum gönderileri için kurallar
-    match /forumPosts/{postId} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null;
-      allow update, delete: if request.auth != null && resource.data.userId == request.auth.uid;
+    // Tüm koleksiyonlara tam erişim ver (debug için)
+    match /{document=**} {
+      allow read, write: if true;
     }
   }
 }

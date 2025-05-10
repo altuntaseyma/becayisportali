@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { exchangeService } from '../services/exchangeService';
 import { ExchangeRequest } from '../types/database';
 import { iller } from '../data/turkiyeData';
+import ExchangeRequestModal from '../components/ExchangeRequestModal';
 
 const ExchangeRequests = () => {
   const { currentUser, currentUserData } = useAuth();
@@ -16,6 +17,7 @@ const ExchangeRequests = () => {
     institution: '',
     onlyActive: true
   });
+  const [selectedRequest, setSelectedRequest] = useState<ExchangeRequest | null>(null);
 
   useEffect(() => {
     loadRequests();
@@ -46,16 +48,17 @@ const ExchangeRequests = () => {
     if (!currentUserData) return false;
     return (
       request.userId !== currentUser?.uid &&
-      request.currentCity === currentUserData.location.il &&
-      request.targetCity === request.currentCity &&
-      request.department === currentUserData.department
+      request.currentCity === currentUserData.currentLocation.city &&
+      request.targetCities.some(city => city.il === currentUserData.currentLocation.city) &&
+      request.department === currentUserData.institutionCategory
     );
   };
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <h1 className="text-2xl font-semibold text-gray-900 mb-6">Tüm Becayiş İstekleri</h1>
+        <h1 className="text-2xl font-semibold text-gray-900 mb-2">Tüm Becayiş İstekleri</h1>
+        <p className="mb-6 text-gray-600">Platformdaki tüm kullanıcıların oluşturduğu becayiş isteklerini burada inceleyebilirsiniz.</p>
 
         {error && (
           <div className="mb-4 bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded">
@@ -185,7 +188,7 @@ const ExchangeRequests = () => {
                     Durum
                   </th>
                   <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    İletişim
+                    Detay
                   </th>
                 </tr>
               </thead>
@@ -200,12 +203,12 @@ const ExchangeRequests = () => {
                       <div className="text-sm text-gray-500">{request.currentDistrict}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">{request.targetCity}</div>
-                      <div className="text-sm text-gray-500">{request.targetDistrict}</div>
+                      <div className="text-sm text-gray-900">{request.targetCities.map(tc => tc.il).join(', ')}</div>
+                      <div className="text-sm text-gray-500">{request.targetCities.map(tc => tc.ilce).join(', ')}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">{request.department}</div>
-                      <div className="text-sm text-gray-500">{request.institution}</div>
+                      <div className="text-sm text-gray-900">{request.institution}</div>
+                      <div className="text-sm text-gray-500">{request.department}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
@@ -217,16 +220,7 @@ const ExchangeRequests = () => {
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {isMatchPotential(request) ? (
-                        <button
-                          onClick={() => {/* İletişim bilgilerini göster */}}
-                          className="text-blue-600 hover:text-blue-900"
-                        >
-                          İletişime Geç
-                        </button>
-                      ) : (
-                        <span>-</span>
-                      )}
+                      <button onClick={() => setSelectedRequest(request)} className="text-blue-600 hover:text-blue-900">Detay</button>
                     </td>
                   </tr>
                 ))}
@@ -234,6 +228,16 @@ const ExchangeRequests = () => {
             </table>
           )}
         </div>
+
+        {selectedRequest && (
+          <ExchangeRequestModal
+            isOpen={!!selectedRequest}
+            onClose={() => setSelectedRequest(null)}
+            onSubmit={async () => {}}
+            request={selectedRequest}
+            canEdit={selectedRequest?.userId === currentUser?.uid}
+          />
+        )}
       </div>
     </div>
   );

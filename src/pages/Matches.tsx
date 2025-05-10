@@ -10,7 +10,7 @@ import MatchDetailModal from '../components/MatchDetailModal';
 const matchingService = new MatchingService();
 
 const Matches = () => {
-  const { currentUser } = useAuth();
+  const { currentUser, currentUserData } = useAuth();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [matches, setMatches] = useState<MatchPair[]>([]);
@@ -20,32 +20,28 @@ const Matches = () => {
 
   useEffect(() => {
     const fetchData = async () => {
-      if (!currentUser) return;
-
+      if (!currentUser || !currentUserData) return;
+      setLoading(true);
       try {
-        // Kullanıcının tercihlerini getir
-        const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
-        if (userDoc.exists()) {
-          const userData = userDoc.data();
-          const preference: MatchPreference = {
-            userId: currentUser.uid,
-            currentLocation: {
-              city: userData.il,
-              district: userData.ilce
-            },
-            targetLocation: {
-              city: userData.hedefIl,
-              district: userData.hedefIlce
-            },
-            institutionType: userData.kurumTuru,
-            position: userData.pozisyon
-          };
-          setUserPreference(preference);
-
-          // Potansiyel eşleşmeleri bul
-          const potentialMatches = await matchingService.findPotentialMatches(preference);
-          setMatches(potentialMatches);
-        }
+        // 1. Kullanıcıya ait MatchPreference oluştur
+        const userPreference = {
+          userId: currentUser.uid,
+          currentLocation: {
+            city: currentUserData.currentLocation?.city || '',
+            district: currentUserData.currentLocation?.district || ''
+          },
+          targetLocation: {
+            city: (currentUserData.desiredLocations && currentUserData.desiredLocations[0]?.city) || '',
+            district: (currentUserData.desiredLocations && currentUserData.desiredLocations[0]?.district) || ''
+          },
+          institutionType: currentUserData.institutionCategory || '',
+          position: currentUserData.displayName || ''
+        };
+        // 2. Potansiyel eşleşmeleri bul ve kaydet
+        await matchingService.findPotentialMatches(userPreference);
+        // 3. Kullanıcının tüm eşleşmelerini getir
+        const allMatches = await matchingService.getAllUserMatches(currentUser.uid);
+        setMatches(allMatches);
       } catch (error) {
         console.error('Eşleşme verisi getirme hatası:', error);
         setError('Eşleşmeler yüklenirken bir hata oluştu');
@@ -53,9 +49,8 @@ const Matches = () => {
         setLoading(false);
       }
     };
-
     fetchData();
-  }, [currentUser]);
+  }, [currentUser, currentUserData]);
 
   const handleMatchAction = async (matchId: string, action: 'accept' | 'reject') => {
     try {

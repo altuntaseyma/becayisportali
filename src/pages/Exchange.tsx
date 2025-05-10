@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { exchangeService } from '../services/exchangeService';
 import { ExchangeRequest } from '../types/database';
 import ExchangeRequestModal from '../components/ExchangeRequestModal';
+import { MatchingService } from '../services/MatchingService';
 
 const Exchange: React.FC = () => {
   const { currentUser } = useAuth();
@@ -12,6 +13,7 @@ const Exchange: React.FC = () => {
   const [success, setSuccess] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState<ExchangeRequest | null>(null);
+  const matchingService = new MatchingService();
 
   useEffect(() => {
     if (currentUser) {
@@ -69,6 +71,7 @@ const Exchange: React.FC = () => {
 
   const handleModalSubmit = async (formData: Omit<ExchangeRequest, 'id' | 'createdAt' | 'updatedAt'>) => {
     try {
+      let userId = currentUser?.uid;
       if (selectedRequest) {
         await exchangeService.updateExchangeRequest(selectedRequest.id, formData);
         setSuccess('Becayiş talebi başarıyla güncellendi.');
@@ -79,6 +82,24 @@ const Exchange: React.FC = () => {
           updatedAt: new Date()
         });
         setSuccess('Becayiş talebi başarıyla oluşturuldu.');
+      }
+      // Eşleşme ve bildirim tetikle
+      if (userId) {
+        // Kullanıcı tercihlerini MatchingService formatına çevir
+        const matchPreference = {
+          userId: userId,
+          currentLocation: {
+            city: formData.currentCity,
+            district: formData.currentDistrict || ''
+          },
+          targetLocation: {
+            city: formData.targetCities && formData.targetCities[0]?.il ? formData.targetCities[0].il : '',
+            district: formData.targetCities && formData.targetCities[0]?.ilce ? formData.targetCities[0].ilce : ''
+          },
+          institutionType: formData.institution,
+          position: formData.position || ''
+        };
+        await matchingService.findPotentialMatches(matchPreference);
       }
       setIsModalOpen(false);
       setSelectedRequest(null);
@@ -171,18 +192,22 @@ const Exchange: React.FC = () => {
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                    <button
-                      onClick={() => handleEditRequest(request)}
-                      className="text-blue-600 hover:text-blue-900 mr-3"
-                    >
-                      Düzenle
-                    </button>
-                    <button
-                      onClick={() => handleDeleteRequest(request.id)}
-                      className="text-red-600 hover:text-red-900"
-                    >
-                      Sil
-                    </button>
+                    {request.userId === currentUser?.uid && (
+                      <>
+                        <button
+                          onClick={() => handleEditRequest(request)}
+                          className="text-blue-600 hover:text-blue-900 mr-3"
+                        >
+                          Düzenle
+                        </button>
+                        <button
+                          onClick={() => handleDeleteRequest(request.id)}
+                          className="text-red-600 hover:text-red-900"
+                        >
+                          Sil
+                        </button>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))

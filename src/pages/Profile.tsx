@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { storage, db } from '../config/firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { doc, updateDoc, getDoc } from 'firebase/firestore';
-import { UserCircleIcon, PencilIcon, CheckIcon, XMarkIcon } from '@heroicons/react/24/solid';
+import { UserCircleIcon, PencilIcon, CheckIcon, XMarkIcon, CameraIcon, ExclamationTriangleIcon } from '@heroicons/react/24/solid';
 import { iller, ilceler } from '../data/turkiyeData';
 import { userService } from '../services/userService';
 import { verificationService } from '../services/verificationService';
@@ -78,6 +78,20 @@ const Profile = () => {
     front?: File;
     back?: File;
   }>({});
+  const [profilePhotoFile, setProfilePhotoFile] = useState<File | null>(null);
+  const [profilePhotoUrl, setProfilePhotoUrl] = useState<string | null>(null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [formErrors, setFormErrors] = useState<{
+    [key: string]: string;
+  }>({});
+  const [showPasswordChange, setShowPasswordChange] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: '',
+    newPassword: '',
+    newPasswordConfirm: ''
+  });
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [passwordSuccess, setPasswordSuccess] = useState<string | null>(null);
 
   useEffect(() => {
     loadUserData();
@@ -101,6 +115,7 @@ const Profile = () => {
               ilce: user.location?.ilce || ''
             }
           });
+          setProfilePhotoUrl(user.profilePhotoUrl || null);
         }
         
         const status = await verificationService.getVerificationStatus(currentUser.uid);
@@ -122,15 +137,20 @@ const Profile = () => {
     }));
   };
 
-  const handleLocationChange = (e: ChangeEvent<HTMLInputElement>) => {
+  const handleLocationChange = (e: ChangeEvent<HTMLSelectElement>) => {
     const { name, value } = e.target;
     setEditedData(prev => ({
       ...prev,
       location: {
         ...prev.location!,
-        [name]: value
+        [name]: value,
+        ...(name === 'il' ? { ilce: '' } : {})
       }
     }));
+  };
+
+  const getIlceler = (il: string) => {
+    return ilceler[il as keyof typeof ilceler] || [];
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, side: 'front' | 'back') => {
@@ -196,9 +216,45 @@ const Profile = () => {
     }
   };
 
+  const validateForm = () => {
+    const errors: { [key: string]: string } = {};
+    
+    if (!editedData.fullName?.trim()) {
+      errors.fullName = 'Ad Soyad alanı zorunludur';
+    }
+    
+    if (!editedData.institution) {
+      errors.institution = 'Kurum seçimi zorunludur';
+    }
+    
+    if (!editedData.department?.trim()) {
+      errors.department = 'Departman alanı zorunludur';
+    }
+    
+    if (!editedData.title) {
+      errors.title = 'Unvan seçimi zorunludur';
+    }
+    
+    if (!editedData.location?.il) {
+      errors.il = 'İl seçimi zorunludur';
+    }
+    
+    if (!editedData.location?.ilce && editedData.location?.il) {
+      errors.ilce = 'İlçe seçimi zorunludur';
+    }
+
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) return;
+
+    if (!validateForm()) {
+      setError('Lütfen tüm zorunlu alanları doldurun.');
+      return;
+    }
 
     try {
       setLoading(true);
@@ -212,6 +268,70 @@ const Profile = () => {
       setError('Profil güncellenirken bir hata oluştu.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleProfilePhotoChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 5 * 1024 * 1024) {
+        setError('Profil fotoğrafı 5MB\'dan büyük olamaz.');
+        return;
+      }
+      if (!file.type.startsWith('image/')) {
+        setError('Lütfen geçerli bir resim dosyası seçin.');
+        return;
+      }
+      setProfilePhotoFile(file);
+      
+      try {
+        setUploadingPhoto(true);
+        const storageRef = ref(storage, `profile-photos/${currentUser?.uid}`);
+        await uploadBytes(storageRef, file);
+        const url = await getDownloadURL(storageRef);
+        await userService.updateUser(currentUser!.uid, { profilePhotoUrl: url });
+        setProfilePhotoUrl(url);
+        setSuccess('Profil fotoğrafı başarıyla güncellendi.');
+      } catch (err) {
+        console.error('Profil fotoğrafı yüklenirken hata:', err);
+        setError('Profil fotoğrafı yüklenemedi.');
+      } finally {
+        setUploadingPhoto(false);
+      }
+    }
+  };
+
+  const handlePasswordChangeInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setPasswordForm(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handlePasswordChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordError(null);
+    setPasswordSuccess(null);
+    if (!passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.newPasswordConfirm) {
+      setPasswordError('Tüm alanları doldurun.');
+      return;
+    }
+    if (passwordForm.newPassword !== passwordForm.newPasswordConfirm) {
+      setPasswordError('Yeni şifreler eşleşmiyor.');
+      return;
+    }
+    if (passwordForm.newPassword.length < 6) {
+      setPasswordError('Yeni şifre en az 6 karakter olmalı.');
+      return;
+    }
+    try {
+      if (!currentUser) throw new Error('Kullanıcı bulunamadı.');
+      const credential = EmailAuthProvider.credential(currentUser.email!, passwordForm.currentPassword);
+      await reauthenticateWithCredential(currentUser, credential);
+      await updatePassword(currentUser, passwordForm.newPassword);
+      setPasswordSuccess('Şifreniz başarıyla değiştirildi.');
+      setPasswordForm({ currentPassword: '', newPassword: '', newPasswordConfirm: '' });
+      setShowPasswordChange(false);
+    } catch (err: any) {
+      setPasswordError(err.message || 'Şifre değiştirilirken hata oluştu.');
     }
   };
 
@@ -243,6 +363,36 @@ const Profile = () => {
           </div>
 
           <div className="p-6">
+            {/* Profil Fotoğrafı */}
+            <div className="flex justify-center mb-6">
+              <div className="relative">
+                {profilePhotoUrl ? (
+                  <img
+                    src={profilePhotoUrl}
+                    alt="Profil fotoğrafı"
+                    className="h-32 w-32 rounded-full object-cover"
+                  />
+                ) : (
+                  <div className="h-32 w-32 rounded-full bg-gray-200 flex items-center justify-center">
+                    <UserCircleIcon className="h-24 w-24 text-gray-400" />
+                  </div>
+                )}
+                <label
+                  htmlFor="profile-photo"
+                  className="absolute bottom-0 right-0 bg-blue-600 rounded-full p-2 cursor-pointer hover:bg-blue-700 transition-colors"
+                >
+                  <CameraIcon className="h-5 w-5 text-white" />
+                </label>
+                <input
+                  type="file"
+                  id="profile-photo"
+                  accept="image/*"
+                  onChange={handleProfilePhotoChange}
+                  className="hidden"
+                />
+              </div>
+            </div>
+
             {error && (
               <div className="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
                 {error}
@@ -258,15 +408,22 @@ const Profile = () => {
             <form onSubmit={handleSubmit} className="space-y-6">
               <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Ad Soyad</label>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Ad Soyad <span className="text-red-500">*</span>
+                  </label>
                   <input
                     type="text"
                     name="fullName"
                     value={editedData.fullName || ''}
                     onChange={handleInputChange}
                     disabled={!isEditing}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:bg-gray-100"
+                    className={`mt-1 block w-full rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:bg-gray-100 ${
+                      formErrors.fullName ? 'border-red-300' : 'border-gray-300'
+                    }`}
                   />
+                  {formErrors.fullName && (
+                    <p className="mt-1 text-sm text-red-600">{formErrors.fullName}</p>
+                  )}
                 </div>
 
                 <div>
@@ -287,8 +444,13 @@ const Profile = () => {
                     value={editedData.institution || ''}
                     onChange={handleInputChange}
                     disabled={!isEditing}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:bg-gray-100"
+                    className={`mt-1 block w-full rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:bg-gray-100 ${
+                      formErrors.institution ? 'border-red-300' : 'border-gray-300'
+                    }`}
                   />
+                  {formErrors.institution && (
+                    <p className="mt-1 text-sm text-red-600">{formErrors.institution}</p>
+                  )}
                 </div>
 
                 <div>
@@ -299,44 +461,82 @@ const Profile = () => {
                     value={editedData.department || ''}
                     onChange={handleInputChange}
                     disabled={!isEditing}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:bg-gray-100"
+                    className={`mt-1 block w-full rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:bg-gray-100 ${
+                      formErrors.department ? 'border-red-300' : 'border-gray-300'
+                    }`}
                   />
+                  {formErrors.department && (
+                    <p className="mt-1 text-sm text-red-600">{formErrors.department}</p>
+                  )}
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700">Unvan</label>
-                  <input
-                    type="text"
+                  <select
                     name="title"
                     value={editedData.title || ''}
                     onChange={handleInputChange}
                     disabled={!isEditing}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:bg-gray-100"
-                  />
+                    className={`mt-1 block w-full rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:bg-gray-100 ${
+                      formErrors.title ? 'border-red-300' : 'border-gray-300'
+                    }`}
+                  >
+                    <option value="">Unvan Seçin</option>
+                    {positions.map((position) => (
+                      <option key={position} value={position}>
+                        {position}
+                      </option>
+                    ))}
+                  </select>
+                  {formErrors.title && (
+                    <p className="mt-1 text-sm text-red-600">{formErrors.title}</p>
+                  )}
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700">İl</label>
-                  <input
-                    type="text"
+                  <select
                     name="il"
                     value={editedData.location?.il || ''}
                     onChange={handleLocationChange}
                     disabled={!isEditing}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:bg-gray-100"
-                  />
+                    className={`mt-1 block w-full rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:bg-gray-100 ${
+                      formErrors.il ? 'border-red-300' : 'border-gray-300'
+                    }`}
+                  >
+                    <option value="">İl Seçin</option>
+                    {iller.map((il) => (
+                      <option key={il} value={il}>
+                        {il}
+                      </option>
+                    ))}
+                  </select>
+                  {formErrors.il && (
+                    <p className="mt-1 text-sm text-red-600">{formErrors.il}</p>
+                  )}
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700">İlçe</label>
-                  <input
-                    type="text"
+                  <select
                     name="ilce"
                     value={editedData.location?.ilce || ''}
                     onChange={handleLocationChange}
-                    disabled={!isEditing}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:bg-gray-100"
-                  />
+                    disabled={!isEditing || !editedData.location?.il}
+                    className={`mt-1 block w-full rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:bg-gray-100 ${
+                      formErrors.ilce ? 'border-red-300' : 'border-gray-300'
+                    }`}
+                  >
+                    <option value="">İlçe Seçin</option>
+                    {editedData.location?.il && ilceler[editedData.location.il]?.map((ilce) => (
+                      <option key={ilce} value={ilce}>
+                        {ilce}
+                      </option>
+                    ))}
+                  </select>
+                  {formErrors.ilce && (
+                    <p className="mt-1 text-sm text-red-600">{formErrors.ilce}</p>
+                  )}
                 </div>
               </div>
 
@@ -373,7 +573,13 @@ const Profile = () => {
                     <CheckCircleIcon className="h-8 w-8 text-green-500 mr-3" />
                   ) : verificationStatus.status === 'rejected' ? (
                     <XCircleIcon className="h-8 w-8 text-red-500 mr-3" />
-                  ) : null}
+                  ) : verificationStatus.status === 'pending' ? (
+                    <div className="h-8 w-8 mr-3">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+                    </div>
+                  ) : (
+                    <ExclamationTriangleIcon className="h-8 w-8 text-yellow-400 mr-3" />
+                  )}
                   <div>
                     <p className="font-medium">
                       {verificationStatus.status === 'verified' && 'Kimliğiniz doğrulandı'}
@@ -381,18 +587,15 @@ const Profile = () => {
                       {verificationStatus.status === 'rejected' && 'Doğrulama reddedildi'}
                       {verificationStatus.status === 'not_submitted' && 'Kimlik doğrulaması gerekiyor'}
                     </p>
-                    {verificationStatus.errors && verificationStatus.errors.length > 0 && (
-                      <ul className="mt-2 list-disc list-inside text-sm text-red-600">
-                        {verificationStatus.errors.map((err, index) => (
-                          <li key={index}>{err}</li>
-                        ))}
-                      </ul>
-                    )}
                     <p className="text-sm text-gray-500 mt-1">
-                      {verificationStatus.status === 'not_submitted' && 
-                        'Lütfen kurum kimlik kartınızın ön ve arka yüzünü yükleyin'}
+                      {verificationStatus.status === 'verified' && 
+                        'Platformun tüm özelliklerini kullanabilirsiniz.'}
+                      {verificationStatus.status === 'pending' && 
+                        'Kimlik bilgileriniz kontrol ediliyor. Bu işlem birkaç dakika sürebilir.'}
                       {verificationStatus.status === 'rejected' && 
-                        'Lütfen bilgilerinizi kontrol edip tekrar deneyin'}
+                        'Kimlik bilgileriniz reddedildi. Lütfen bilgilerinizi kontrol edip tekrar deneyin.'}
+                      {verificationStatus.status === 'not_submitted' && 
+                        'Platform özelliklerini kullanabilmek için kimlik doğrulaması yapmanız gerekmektedir.'}
                     </p>
                   </div>
                 </div>
@@ -400,6 +603,17 @@ const Profile = () => {
 
               {verificationStatus.status !== 'verified' && (
                 <div className="space-y-4">
+                  <div className="bg-blue-50 p-4 rounded-lg mb-4">
+                    <h4 className="text-sm font-medium text-blue-800 mb-2">Kimlik Doğrulama Hakkında</h4>
+                    <ul className="list-disc list-inside text-sm text-blue-700 space-y-1">
+                      <li>Kurum kimlik kartınızın ön ve arka yüzünü yüklemeniz gerekmektedir</li>
+                      <li>Kimlik kartı üzerindeki bilgiler profil bilgilerinizle eşleşmelidir</li>
+                      <li>Yüklediğiniz fotoğraflar net ve okunaklı olmalıdır</li>
+                      <li>Doğrulama işlemi otomatik olarak yapılmaktadır</li>
+                      <li>Reddedilen başvurular için düzeltme yapıp tekrar deneyebilirsiniz</li>
+                    </ul>
+                  </div>
+
                   <div>
                     <label className="block text-sm font-medium text-gray-700">
                       Kimlik Kartı (Ön Yüz)
@@ -482,6 +696,79 @@ const Profile = () => {
                     </div>
                   )}
                 </div>
+              )}
+            </div>
+
+            {/* Şifre Değiştirme Bölümü */}
+            <div className="mt-8 border-t border-gray-200 pt-8">
+              <h3 className="text-lg font-medium text-gray-900 mb-4">Şifre Değiştir</h3>
+              {!showPasswordChange && (
+                <button
+                  className="px-4 py-2 border border-blue-600 text-blue-600 rounded hover:bg-blue-50"
+                  onClick={() => setShowPasswordChange(true)}
+                  type="button"
+                >
+                  Şifre Değiştir
+                </button>
+              )}
+              {showPasswordChange && (
+                <form onSubmit={handlePasswordChange} className="space-y-4 max-w-md">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Mevcut Şifre</label>
+                    <input
+                      type="password"
+                      name="currentPassword"
+                      value={passwordForm.currentPassword}
+                      onChange={handlePasswordChangeInput}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Yeni Şifre</label>
+                    <input
+                      type="password"
+                      name="newPassword"
+                      value={passwordForm.newPassword}
+                      onChange={handlePasswordChangeInput}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Yeni Şifre Tekrar</label>
+                    <input
+                      type="password"
+                      name="newPasswordConfirm"
+                      value={passwordForm.newPasswordConfirm}
+                      onChange={handlePasswordChangeInput}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm"
+                      required
+                    />
+                  </div>
+                  {passwordError && <div className="text-red-600 text-sm">{passwordError}</div>}
+                  {passwordSuccess && <div className="text-green-600 text-sm">{passwordSuccess}</div>}
+                  <div className="flex space-x-2">
+                    <button
+                      type="submit"
+                      className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                    >
+                      Kaydet
+                    </button>
+                    <button
+                      type="button"
+                      className="px-4 py-2 border border-gray-400 rounded hover:bg-gray-100"
+                      onClick={() => {
+                        setShowPasswordChange(false);
+                        setPasswordForm({ currentPassword: '', newPassword: '', newPasswordConfirm: '' });
+                        setPasswordError(null);
+                        setPasswordSuccess(null);
+                      }}
+                    >
+                      İptal
+                    </button>
+                  </div>
+                </form>
               )}
             </div>
           </div>

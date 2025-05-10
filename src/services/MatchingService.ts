@@ -1,6 +1,13 @@
 import { collection, query, where, getDocs, addDoc, Timestamp } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { MatchPair, MatchPreference, MatchScore } from '../types/matching';
+import { User } from '../types/database';
+
+// Basit bir bildirim fonksiyonu (ileride e-posta veya push notification ile değiştirilebilir)
+async function notifyUser(userId: string, message: string) {
+  // Burada gerçek bildirim servisine entegre edebilirsin
+  console.log(`BİLDİRİM -> Kullanıcı: ${userId} | Mesaj: ${message}`);
+}
 
 export class MatchingService {
   private calculateLocationScore(location1: { city: string; district: string }, location2: { city: string; district: string }): number {
@@ -53,6 +60,12 @@ export class MatchingService {
     const matches: MatchPair[] = [];
     const usersRef = collection(db, 'users');
     
+    // Eksik alan kontrolü (userPreference)
+    if (!userPreference?.currentLocation?.city || !userPreference?.currentLocation?.district || !userPreference?.targetLocation?.city || !userPreference?.targetLocation?.district || !userPreference?.institutionType || !userPreference?.position) {
+      console.error('Kullanıcı tercihlerinde zorunlu alan(lar) eksik, eşleşme yapılmayacak.');
+      return matches;
+    }
+    
     // Hedef şehri kullanıcının bulunduğu şehir olan kullanıcıları bul
     const q = query(
       usersRef,
@@ -72,16 +85,22 @@ export class MatchingService {
         const matchPreference: MatchPreference = {
           userId: doc.id,
           currentLocation: {
-            city: matchData.il,
-            district: matchData.ilce
+            city: matchData.il || '',
+            district: matchData.ilce || ''
           },
           targetLocation: {
-            city: matchData.hedefIl,
-            district: matchData.hedefIlce
+            city: matchData.hedefIl || '',
+            district: matchData.hedefIlce || ''
           },
-          institutionType: matchData.kurumTuru,
-          position: matchData.pozisyon
+          institutionType: matchData.kurumTuru || '',
+          position: matchData.pozisyon || ''
         };
+
+        // Eksik alan kontrolü (matchPreference)
+        if (!matchPreference.currentLocation.city || !matchPreference.currentLocation.district || !matchPreference.targetLocation.city || !matchPreference.targetLocation.district || !matchPreference.institutionType || !matchPreference.position) {
+          console.warn('Potansiyel eşleşme adayında zorunlu alan(lar) eksik, eşleşme yapılmayacak.');
+          continue;
+        }
 
         const score = this.calculateMatchScore(userPreference, matchPreference);
 
@@ -96,6 +115,11 @@ export class MatchingService {
             createdAt: new Date()
           };
 
+          // Eşleşmeyi veritabanına kaydet
+          await this.createMatch(match);
+          // Bildirim gönder
+          await notifyUser(userPreference.userId, 'Yeni bir becayiş eşleşmeniz oluştu!');
+          await notifyUser(matchPreference.userId, 'Yeni bir becayiş eşleşmeniz oluştu!');
           matches.push(match);
         }
       }
@@ -126,5 +150,57 @@ export class MatchingService {
       ...doc.data(),
       createdAt: (doc.data().createdAt as Timestamp).toDate()
     })) as MatchPair[];
+  }
+
+  async getAllUserMatches(userId: string): Promise<MatchPair[]> {
+    const matchesRef = collection(db, 'matches');
+    const q1 = query(matchesRef, where('user1Id', '==', userId));
+    const q2 = query(matchesRef, where('user2Id', '==', userId));
+
+    const [snapshot1, snapshot2] = await Promise.all([getDocs(q1), getDocs(q2)]);
+    const matches = [
+      ...snapshot1.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        createdAt: (doc.data().createdAt as Timestamp).toDate()
+      })),
+      ...snapshot2.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        createdAt: (doc.data().createdAt as Timestamp).toDate()
+      }))
+    ];
+    // Aynı eşleşme iki kez gelirse filtrele
+    return matches.filter((match, index, self) =>
+      index === self.findIndex((m) => m.id === match.id)
+    ) as MatchPair[];
+  }
+
+  /**
+   * Admin fonksiyonu: Tüm kullanıcıların istekleri arasında toplu eşleşme yapar.
+   */
+  async runBatchMatchingForAllUsers(): Promise<void> {
+    const usersRef = collection(db, 'users');
+    const usersSnapshot = await getDocs(usersRef);
+    const users = usersSnapshot.docs.map(doc => ({ ...(doc.data() as User), id: doc.id }));
+
+    for (const user of users) {
+      // Kullanıcıdan MatchPreference oluştur
+      const userPreference: MatchPreference = {
+        userId: user.id,
+        currentLocation: {
+          city: user.location?.il || '',
+          district: user.location?.ilce || ''
+        },
+        targetLocation: {
+          city: '', // Eğer kullanıcıya ait hedef şehir bilgisi varsa buraya ekle, yoksa boş bırak
+          district: ''
+        },
+        institutionType: user.institution || '',
+        position: user.title || ''
+      };
+      // Potansiyel eşleşmeleri bul ve kaydet
+      await this.findPotentialMatches(userPreference);
+    }
   }
 } 
