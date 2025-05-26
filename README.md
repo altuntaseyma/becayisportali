@@ -1,3 +1,10 @@
+
+
+WEB TASARIMI VE PROGRAMLAMA DERSİ PROJESİ KAMU BECAYİS SİSTEMİ MOBİL UYGULAMASI
+
+PROJE DÖKÜMANI:
+https://docs.google.com/document/d/1TKboEuu2061em83bHJQcQGBcm7-GRodK/edit
+
 # React + TypeScript + Vite
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
